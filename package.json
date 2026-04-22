@@ -1,0 +1,25 @@
+{
+  "name": "pi-gateway",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Expose Pi as an OpenAI-compatible backend for external frontends",
+  "main": "index.js",
+  "bin": {
+    "pi-gateway-server": "./bin/pi-gateway-server.mjs"
+  },
+  "scripts": {
+    "start": "node bin/pi-gateway-server.mjs",
+    "test": "node --test"
+  },
+  "pi": {
+    "extensions": ["./index.js"]
+  },
+  "dependencies": {
+    "@mariozechner/pi-coding-agent": "^0.65.0",
+    "express": "^4.21.0",
+    "uuid": "^10.0.0",
+    "@sinclair/typebox": "^0.34.41"
+  },
+  "keywords": ["pi", "gateway", "openai", "llm", "api", "backend"],
+  "license": "MIT"
+}
