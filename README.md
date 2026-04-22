@@ -36,12 +36,6 @@ Any frontend that supports OpenAI-compatible APIs:
 ## Install
 
 ```bash
-npm install -g pi-gateway
-```
-
-Or from source:
-
-```bash
 npm install -g PopCat19/pi-gateway
 ```
 
