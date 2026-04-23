@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { v4 as uuidv4 } from "uuid";
-import { getSession, deleteSession, replayHistory } from "../session-manager.js";
+import { getSession, buildHistoryContext } from "../session-manager.js";
 
 export const completionsRouter = Router();
 
@@ -70,7 +70,7 @@ function convertMessages(openaiMessages) {
 }
 
 /**
- * Extract text content from assistant message.
+ * Extract text content from message.
  */
 function extractText(message) {
   if (!message?.content) return "";
@@ -114,17 +114,34 @@ completionsRouter.post("/", async (req, res) => {
     });
     
     // Convert messages to Pi format
-    const { messages: piMessages, systemPrompt } = convertMessages(messages);
+    const { messages: piMessages } = convertMessages(messages);
     
-    // If this is a new session, replay history to establish context
+    // Build prompt text
+    let promptText = "";
+    
+    // For new sessions with history, prepend context
     if (isNew && piMessages.length > 1) {
-      await replayHistory(session, piMessages);
+      // Get all but last user message (that's the new prompt)
+      const historyMessages = piMessages.slice(0, -1);
+      if (historyMessages.length > 0) {
+        const historyContext = buildHistoryContext(historyMessages);
+        if (historyContext) {
+          promptText = `[Previous conversation context]\n${historyContext}\n\n[Current message]\n`;
+        }
+      }
+    }
+    
+    // Add the last user message
+    const lastUserMessage = piMessages.filter(m => m.role === "user").pop();
+    if (lastUserMessage) {
+      const userText = extractText(lastUserMessage);
+      promptText += userText;
     }
     
     if (stream) {
-      await handleStreamingCompletion(req, res, { session, piMessages, model: modelId, conversationId, config });
+      await handleStreamingCompletion(req, res, { session, promptText, model: modelId, conversationId });
     } else {
-      await handleNonStreamingCompletion(req, res, { session, piMessages, model: modelId, conversationId, config });
+      await handleNonStreamingCompletion(req, res, { session, promptText, model: modelId, conversationId });
     }
   } catch (error) {
     console.error("Completion error:", error);
@@ -140,7 +157,7 @@ completionsRouter.post("/", async (req, res) => {
 /**
  * Handle streaming completion with SSE.
  */
-async function handleStreamingCompletion(req, res, { session, piMessages, model, conversationId, config }) {
+async function handleStreamingCompletion(req, res, { session, promptText, model, conversationId }) {
   // Set SSE headers
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
@@ -151,40 +168,33 @@ async function handleStreamingCompletion(req, res, { session, piMessages, model,
   const completionId = `chatcmpl-${uuidv4().replace(/-/g, "").slice(0, 24)}`;
   const created = Math.floor(Date.now() / 1000);
   
-  let fullContent = "";
+  let sentContent = "";
   let isComplete = false;
   let promptTokens = 0;
   let completionTokens = 0;
+  let responseContent = "";
   
   // Subscribe to session events
   const unsubscribe = session.subscribe((event) => {
     try {
       switch (event.type) {
-        case "message_start":
-          // New message starting
-          if (event.message?.role === "assistant") {
-            // Could send initial chunk here if needed
-          }
-          break;
-          
         case "message_update":
           // Streaming update
           if (event.message?.role === "assistant") {
-            const content = extractText(event.message);
-            const newContent = content.slice(fullContent.length);
+            const fullContent = extractText(event.message);
+            responseContent = fullContent;
+            
+            const newContent = fullContent.slice(sentContent.length);
             
             if (newContent) {
-              fullContent = content;
-              
-              // Buffer and send only complete lines to preserve markdown tables
-              // Incomplete lines will be sent in the next update or on completion
+              // Buffer and send only complete lines
               const lines = newContent.split("\n");
-              const completeLines = lines.slice(0, -1); // All but last (may be incomplete)
-              const remaining = lines[lines.length - 1];
+              const completeLines = lines.slice(0, -1);
               
-              // Only send if we have complete lines
               if (completeLines.length > 0) {
                 const textToSend = completeLines.join("\n") + "\n";
+                sentContent += textToSend;
+                
                 const chunk = {
                   id: completionId,
                   object: "chat.completion.chunk",
@@ -204,8 +214,26 @@ async function handleStreamingCompletion(req, res, { session, piMessages, model,
           
         case "message_end":
           if (event.message?.role === "assistant") {
-            // Update usage info
-            if (event.message.usage) {
+            // Send any remaining content
+            const remaining = responseContent.slice(sentContent.length);
+            if (remaining) {
+              sentContent += remaining;
+              const chunk = {
+                id: completionId,
+                object: "chat.completion.chunk",
+                created,
+                model,
+                choices: [{
+                  index: 0,
+                  delta: { content: remaining },
+                  finish_reason: null,
+                }],
+              };
+              res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+            }
+            
+            // Update usage
+            if (event.message?.usage) {
               promptTokens = event.message.usage.input || 0;
               completionTokens = event.message.usage.output || 0;
             }
@@ -213,12 +241,7 @@ async function handleStreamingCompletion(req, res, { session, piMessages, model,
           break;
           
         case "turn_end":
-          // Turn complete
-          isComplete = true;
-          break;
-          
         case "agent_end":
-          // Agent finished
           isComplete = true;
           break;
       }
@@ -228,28 +251,20 @@ async function handleStreamingCompletion(req, res, { session, piMessages, model,
   });
   
   try {
-    // Build prompt text from already-converted messages
-    const lastUserMessage = piMessages.filter(m => m.role === "user").pop();
-    const userText = lastUserMessage?.content 
-      ? (typeof lastUserMessage.content === "string" 
-          ? lastUserMessage.content 
-          : lastUserMessage.content.filter(c => c.type === "text").map(c => c.text).join("\n"))
-      : "";
-    
     // Send the prompt
-    await session.prompt(userText, { 
+    await session.prompt(promptText, { 
       expandPromptTemplates: false,
       source: "rpc",
     });
     
-    // Wait for completion (with timeout)
+    // Wait for completion
     const maxWait = 300000; // 5 minutes
     const startWait = Date.now();
     while (!isComplete && Date.now() - startWait < maxWait) {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
     
-    // Send final chunk
+    // Final chunk
     const finalChunk = {
       id: completionId,
       object: "chat.completion.chunk",
@@ -271,8 +286,6 @@ async function handleStreamingCompletion(req, res, { session, piMessages, model,
     
   } catch (error) {
     console.error("Stream error:", error);
-    
-    // Send error chunk
     const errorChunk = {
       id: completionId,
       object: "chat.completion.chunk",
@@ -286,7 +299,6 @@ async function handleStreamingCompletion(req, res, { session, piMessages, model,
     };
     res.write(`data: ${JSON.stringify(errorChunk)}\n\n`);
     res.write("data: [DONE]\n\n");
-    
   } finally {
     unsubscribe();
     res.end();
@@ -296,11 +308,11 @@ async function handleStreamingCompletion(req, res, { session, piMessages, model,
 /**
  * Handle non-streaming completion.
  */
-async function handleNonStreamingCompletion(req, res, { session, piMessages, model, conversationId, config }) {
+async function handleNonStreamingCompletion(req, res, { session, promptText, model, conversationId }) {
   const completionId = `chatcmpl-${uuidv4().replace(/-/g, "").slice(0, 24)}`;
   const created = Math.floor(Date.now() / 1000);
   
-  let fullContent = "";
+  let responseContent = "";
   let promptTokens = 0;
   let completionTokens = 0;
   let isComplete = false;
@@ -311,8 +323,8 @@ async function handleNonStreamingCompletion(req, res, { session, piMessages, mod
       switch (event.type) {
         case "message_end":
           if (event.message?.role === "assistant") {
-            fullContent = extractText(event.message);
-            if (event.message.usage) {
+            responseContent = extractText(event.message);
+            if (event.message?.usage) {
               promptTokens = event.message.usage.input || 0;
               completionTokens = event.message.usage.output || 0;
             }
@@ -330,22 +342,14 @@ async function handleNonStreamingCompletion(req, res, { session, piMessages, mod
   });
   
   try {
-    // Build prompt text from already-converted messages
-    const lastUserMessage = piMessages.filter(m => m.role === "user").pop();
-    const userText = lastUserMessage?.content 
-      ? (typeof lastUserMessage.content === "string" 
-          ? lastUserMessage.content 
-          : lastUserMessage.content.filter(c => c.type === "text").map(c => c.text).join("\n"))
-      : "";
-    
     // Send the prompt
-    await session.prompt(userText, { 
+    await session.prompt(promptText, { 
       expandPromptTemplates: false,
       source: "rpc",
     });
     
-    // Wait for completion (with timeout)
-    const maxWait = 300000; // 5 minutes
+    // Wait for completion
+    const maxWait = 300000;
     const startWait = Date.now();
     while (!isComplete && Date.now() - startWait < maxWait) {
       await new Promise(resolve => setTimeout(resolve, 100));
@@ -360,7 +364,7 @@ async function handleNonStreamingCompletion(req, res, { session, piMessages, mod
         index: 0,
         message: {
           role: "assistant",
-          content: fullContent,
+          content: responseContent,
         },
         finish_reason: "stop",
       }],

@@ -93,49 +93,48 @@ export async function getSession({ conversationId, model, agentDir, signal }) {
 }
 
 /**
- * Replay conversation history into a new session.
- * Sends all messages to establish context before the actual prompt.
- * @param {import("@mariozechner/pi-coding-agent").AgentSession} session
+ * Build context from conversation history.
+ * Returns a formatted context string for the model.
  * @param {Array} messages - Pi format messages
+ * @returns {string} Context string
  */
-export async function replayHistory(session, messages) {
-  // Send all but the last user message to establish context
-  const userMessages = messages.filter(m => m.role === "user");
-  const assistantMessages = messages.filter(m => m.role === "assistant");
+export function buildHistoryContext(messages) {
+  const parts = [];
   
-  // Build pairs of user + assistant messages (conversation turns)
-  // We need to send them in order, but only user messages trigger Pi
-  // Assistant messages are already in the session after responses
-  
-  // For now, send user messages sequentially
-  // The session will accumulate context
-  for (let i = 0; i < userMessages.length - 1; i++) {
-    const userMsg = userMessages[i];
-    const text = typeof userMsg.content === "string" 
-      ? userMsg.content 
-      : userMsg.content.filter(c => c.type === "text").map(c => c.text).join("\n");
-    
-    // Send prompt and wait for completion
-    let turnComplete = false;
-    const unsubscribe = session.subscribe((event) => {
-      if (event.type === "turn_end" || event.type === "agent_end") {
-        turnComplete = true;
+  for (const msg of messages) {
+    if (msg.role === "user") {
+      const text = typeof msg.content === "string" 
+        ? msg.content 
+        : msg.content.filter(c => c.type === "text").map(c => c.text).join("\n");
+      if (text) {
+        parts.push(`User: ${text}`);
       }
-    });
-    
-    try {
-      await session.prompt(text, { expandPromptTemplates: false, source: "rpc" });
-      
-      // Wait for turn to complete
-      const maxWait = 60000; // 1 minute per historical message
-      const startWait = Date.now();
-      while (!turnComplete && Date.now() - startWait < maxWait) {
-        await new Promise(resolve => setTimeout(resolve, 50));
+    } else if (msg.role === "assistant") {
+      const text = extractText(msg);
+      if (text) {
+        parts.push(`Assistant: ${text}`);
       }
-    } finally {
-      unsubscribe();
+    } else if (msg.role === "system") {
+      // System messages are handled separately by Pi
     }
   }
+  
+  return parts.join("\n\n");
+}
+
+/**
+ * Extract text content from assistant message.
+ */
+function extractText(message) {
+  if (!message?.content) return "";
+  if (typeof message.content === "string") return message.content;
+  if (Array.isArray(message.content)) {
+    return message.content
+      .filter(c => c.type === "text")
+      .map(c => c.text)
+      .join("");
+  }
+  return "";
 }
 
 /**
