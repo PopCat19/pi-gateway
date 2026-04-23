@@ -445,8 +445,6 @@ async function handleNonStreamingCompletion(req, res, { session, promptText, mod
         message,
         finish_reason: "stop",
       }],
-        finish_reason: "stop",
-      }],
       usage: {
         prompt_tokens: promptTokens,
         completion_tokens: completionTokens,
