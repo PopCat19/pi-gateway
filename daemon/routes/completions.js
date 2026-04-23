@@ -114,10 +114,15 @@ completionsRouter.post("/", async (req, res) => {
     });
     
     // Convert messages to Pi format
-    const { messages: piMessages } = convertMessages(messages);
+    const { messages: piMessages, systemPrompt } = convertMessages(messages);
     
     // Build prompt text
     let promptText = "";
+    
+    // Include system prompt (character card from frontend)
+    if (systemPrompt) {
+      promptText = `[Character/Instructions]\n${systemPrompt}\n\n`;
+    }
     
     // For new sessions with history, prepend context
     if (isNew && piMessages.length > 1) {
@@ -126,7 +131,7 @@ completionsRouter.post("/", async (req, res) => {
       if (historyMessages.length > 0) {
         const historyContext = buildHistoryContext(historyMessages);
         if (historyContext) {
-          promptText = `[Previous conversation context]\n${historyContext}\n\n[Current message]\n`;
+          promptText += `[Previous conversation]\n${historyContext}\n\n`;
         }
       }
     }
