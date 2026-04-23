@@ -125,12 +125,18 @@ completionsRouter.post("/", async (req, res) => {
     });
     
     // Convert messages to Pi format
-    const { messages: piMessages, systemPrompt } = convertMessages(messages);
+    const { messages: piMessages, systemPrompt: frontendSystemPrompt } = convertMessages(messages);
     
     // Build prompt text
     let promptText = "";
     
-    // Include system prompt (character card from frontend)
+    // Determine system prompt source
+    // useThreadPersona: true = let thread history define persona (no injected system prompt)
+    // useThreadPersona: false = use config systemPrompt as fallback
+    const systemPrompt = frontendSystemPrompt 
+      || (config.useThreadPersona ? undefined : config.systemPrompt);
+    
+    // Include system prompt if available
     if (systemPrompt) {
       promptText = `[SYSTEM INSTRUCTIONS]\n${systemPrompt}\n[/SYSTEM]\n\n`;
     }
