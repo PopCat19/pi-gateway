@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { v4 as uuidv4 } from "uuid";
-import { getSession, deleteSession } from "./session-manager.js";
+import { getSession, deleteSession } from "../session-manager.js";
 
 export const completionsRouter = Router();
 
