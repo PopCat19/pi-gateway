@@ -62,7 +62,15 @@ export async function createServer({ paths, config }) {
   });
   
   const server = createHttpServer(app);
-  await new Promise((resolve) => {
+  
+  await new Promise((resolve, reject) => {
+    server.once("error", (err) => {
+      if (err.code === "EADDRINUSE") {
+        reject(new Error(`Port ${config.port} is already in use. Change the port in config or stop the conflicting service.`));
+      } else {
+        reject(err);
+      }
+    });
     server.listen(config.port, config.host, () => resolve());
   });
   

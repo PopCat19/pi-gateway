@@ -59,7 +59,7 @@ Config file: `~/.pi/agent/pi-gateway/config.json`
 
 ```json
 {
-  "port": 8000,
+  "port": 8001,
   "host": "127.0.0.1",
   "defaultModel": "openai/gpt-4o",
   "systemPrompt": "You are a helpful assistant.",
@@ -74,7 +74,7 @@ Config file: `~/.pi/agent/pi-gateway/config.json`
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `port` | number | 8000 | Server port |
+| `port` | number | 8001 | Server port (avoid SillyTavern's 8000) |
 | `host` | string | "127.0.0.1" | Server host |
 | `defaultModel` | string | - | Default model (provider/model format) |
 | `systemPrompt` | string | - | Default system prompt |
