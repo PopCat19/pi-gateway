@@ -168,18 +168,28 @@ async function handleStreamingCompletion(req, res, { session, messages, model, c
             if (newContent) {
               fullContent = content;
               
-              const chunk = {
-                id: completionId,
-                object: "chat.completion.chunk",
-                created,
-                model,
-                choices: [{
-                  index: 0,
-                  delta: { content: newContent },
-                  finish_reason: null,
-                }],
-              };
-              res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+              // Buffer and send only complete lines to preserve markdown tables
+              // Incomplete lines will be sent in the next update or on completion
+              const lines = newContent.split("\n");
+              const completeLines = lines.slice(0, -1); // All but last (may be incomplete)
+              const remaining = lines[lines.length - 1];
+              
+              // Only send if we have complete lines
+              if (completeLines.length > 0) {
+                const textToSend = completeLines.join("\n") + "\n";
+                const chunk = {
+                  id: completionId,
+                  object: "chat.completion.chunk",
+                  created,
+                  model,
+                  choices: [{
+                    index: 0,
+                    delta: { content: textToSend },
+                    finish_reason: null,
+                  }],
+                };
+                res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+              }
             }
           }
           break;
