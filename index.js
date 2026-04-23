@@ -1,140 +1,107 @@
 /**
  * pi-gateway - Pi extension for OpenAI-compatible API gateway
- * 
- * This extension exposes Pi as an OpenAI-compatible backend,
- * allowing any frontend (SillyTavern, Open WebUI, LibreChat, etc.) to connect.
- * 
- * Pi commands:
- *   /gateway start    - Start the OpenAI-compatible server
- *   /gateway stop     - Stop the server
- *   /gateway status   - Check server status
- *   /gateway config   - Show current configuration
  */
 
 import { createServer } from "./daemon/server.js";
 import { loadConfig, validateConfig } from "./lib/config.js";
 import { getPaths } from "./lib/paths.js";
 
-/** @type {import("node:http").Server | null} */
 let server = null;
-
-/** @type {ReturnType<typeof getPaths> | null} */
 let paths = null;
-
-/** @type {import("./lib/config.js").GatewayConfig | null} */
 let config = null;
 
-/**
- * Start the gateway server.
- * @param {{ context: import("@mariozechner/pi-coding-agent").ExtensionContext }} options
- */
-export async function startServer({ context }) {
-  if (server) {
-    return { success: false, message: "Server is already running." };
-  }
-  
-  paths = getPaths({ workspaceDir: context.agentDir });
-  config = await loadConfig(paths);
-  
-  const validation = validateConfig(config);
-  if (validation.errors.length > 0) {
-    return {
-      success: false,
-      message: `Invalid configuration:\n- ${validation.errors.join("\n- ")}`,
-    };
-  }
-  
-  if (validation.warnings.length > 0) {
-    context.logger.warn("gateway-config-warnings", validation.warnings.join("\n"));
-  }
-  
-  server = await createServer({ paths, config });
-  
-  const address = server.address();
-  return {
-    success: true,
-    message: `Gateway server started on http://${config.host}:${address.port}`,
-    url: `http://localhost:${address.port}`,
-  };
+function sendText(pi, text) {
+  pi.sendMessage({ customType: "pi-gateway", content: text, display: true });
 }
 
-/**
- * Stop the gateway server.
- */
-export async function stopServer() {
-  if (!server) {
-    return { success: false, message: "Server is not running." };
-  }
-  
-  await new Promise((resolve) => server.close(resolve));
-  server = null;
-  
-  return { success: true, message: "Gateway server stopped." };
+function helpText() {
+  return [
+    "`/gateway start` starts the OpenAI-compatible HTTP server.",
+    "`/gateway stop` stops the server.",
+    "`/gateway status` shows server health and port.",
+    "`/gateway config` prints the current configuration.",
+    "",
+    "Config: " + (paths?.configPath || "~/.pi/agent/pi-gateway/config.json"),
+  ].join("\n");
 }
 
-/**
- * Get server status.
- */
-export function getStatus() {
-  if (!server) {
-    return { running: false };
-  }
-  
-  const address = server.address();
-  return {
-    running: true,
-    host: config?.host,
-    port: address.port,
-    url: `http://localhost:${address.port}`,
-  };
-}
-
-/**
- * Extension factory - creates the gateway extension.
- * @param {{ logger: import("@mariozechner/pi-coding-agent").Logger }} options
- */
-export default function createGatewayExtension({ logger }) {
-  return {
-    name: "pi-gateway",
-    
-    commands: {
-      "gateway": {
-        description: "Manage OpenAI-compatible API gateway",
-        subcommands: {
-          start: {
-            description: "Start the gateway server",
-            handler: async () => {
-              const result = await startServer({ context: { agentDir: process.env.PI_AGENT_DIR, logger } });
-              return result.message;
-            },
-          },
-          stop: {
-            description: "Stop the gateway server",
-            handler: async () => {
-              const result = await stopServer();
-              return result.message;
-            },
-          },
-          status: {
-            description: "Check gateway status",
-            handler: () => {
-              const status = getStatus();
-              return status.running
-                ? `Gateway running on ${status.url}`
-                : "Gateway is not running.";
-            },
-          },
-          config: {
-            description: "Show current configuration",
-            handler: () => {
-              if (!config) {
-                return "Gateway not initialized. Run /gateway start first.";
-              }
-              return JSON.stringify(config, null, 2);
-            },
-          },
-        },
-      },
+export default function (pi) {
+  pi.registerCommand("gateway", {
+    description: "Manage the OpenAI-compatible API gateway: /gateway start|stop|status|config",
+    handler: async (input, ctx) => {
+      const args = input.trim().split(/\s+/);
+      const subcommand = args[0] || "help";
+      
+      paths = getPaths({ agentDir: process.env.PI_AGENT_DIR || ctx?.agentDir });
+      
+      if (subcommand === "start") {
+        if (server) {
+          sendText(pi, "Gateway server is already running.");
+          return;
+        }
+        
+        try {
+          config = await loadConfig(paths);
+          const validation = validateConfig(config);
+          
+          if (validation.errors.length > 0) {
+            sendText(pi, `Configuration errors:\n- ${validation.errors.join("\n- ")}`);
+            return;
+          }
+          
+          if (validation.warnings.length > 0) {
+            for (const warning of validation.warnings) {
+              pi.logger?.warn?.("gateway-config", warning);
+            }
+          }
+          
+          server = await createServer({ paths, config });
+          const address = server.address();
+          sendText(pi, `Gateway server started.\nURL: http://localhost:${address.port}\nEndpoints: /v1/chat/completions, /v1/models`);
+        } catch (error) {
+          sendText(pi, `Failed to start gateway: ${error.message}`);
+        }
+        return;
+      }
+      
+      if (subcommand === "stop") {
+        if (!server) {
+          sendText(pi, "Gateway server is not running.");
+          return;
+        }
+        
+        await new Promise((resolve) => server.close(resolve));
+        server = null;
+        sendText(pi, "Gateway server stopped.");
+        return;
+      }
+      
+      if (subcommand === "status") {
+        if (!server) {
+          sendText(pi, "Gateway server is not running.\nConfig: " + paths?.configPath);
+        } else {
+          const address = server.address();
+          sendText(pi, [
+            "Gateway server running.",
+            `Host: ${config?.host || "127.0.0.1"}`,
+            `Port: ${address.port}`,
+            `URL: http://localhost:${address.port}`,
+            `Config: ${paths?.configPath}`,
+          ].join("\n"));
+        }
+        return;
+      }
+      
+      if (subcommand === "config") {
+        if (!config) {
+          sendText(pi, "No configuration loaded. Run /gateway start first.");
+        } else {
+          sendText(pi, JSON.stringify(config, null, 2));
+        }
+        return;
+      }
+      
+      sendText(pi, helpText());
     },
-  };
+  });
 }
