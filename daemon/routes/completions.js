@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { v4 as uuidv4 } from "uuid";
-import { getSession, deleteSession } from "../session-manager.js";
+import { getSession, deleteSession, replayHistory } from "../session-manager.js";
 
 export const completionsRouter = Router();
 
@@ -106,17 +106,25 @@ completionsRouter.post("/", async (req, res) => {
   
   try {
     // Get or create Pi session
-    const session = await getSession({
+    const { session, isNew } = await getSession({
       conversationId,
       model: modelId,
       agentDir: paths?.agentDir,
       signal: req.signal,
     });
     
+    // Convert messages to Pi format
+    const { messages: piMessages, systemPrompt } = convertMessages(messages);
+    
+    // If this is a new session, replay history to establish context
+    if (isNew && piMessages.length > 1) {
+      await replayHistory(session, piMessages);
+    }
+    
     if (stream) {
-      await handleStreamingCompletion(req, res, { session, messages, model: modelId, conversationId, config });
+      await handleStreamingCompletion(req, res, { session, piMessages, model: modelId, conversationId, config });
     } else {
-      await handleNonStreamingCompletion(req, res, { session, messages, model: modelId, conversationId, config });
+      await handleNonStreamingCompletion(req, res, { session, piMessages, model: modelId, conversationId, config });
     }
   } catch (error) {
     console.error("Completion error:", error);
@@ -132,7 +140,7 @@ completionsRouter.post("/", async (req, res) => {
 /**
  * Handle streaming completion with SSE.
  */
-async function handleStreamingCompletion(req, res, { session, messages, model, conversationId, config }) {
+async function handleStreamingCompletion(req, res, { session, piMessages, model, conversationId, config }) {
   // Set SSE headers
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
@@ -220,10 +228,7 @@ async function handleStreamingCompletion(req, res, { session, messages, model, c
   });
   
   try {
-    // Convert messages and send prompt
-    const { messages: piMessages, systemPrompt } = convertMessages(messages);
-    
-    // Build prompt text from messages (simplified - full impl would use session properly)
+    // Build prompt text from already-converted messages
     const lastUserMessage = piMessages.filter(m => m.role === "user").pop();
     const userText = lastUserMessage?.content 
       ? (typeof lastUserMessage.content === "string" 
@@ -291,7 +296,7 @@ async function handleStreamingCompletion(req, res, { session, messages, model, c
 /**
  * Handle non-streaming completion.
  */
-async function handleNonStreamingCompletion(req, res, { session, messages, model, conversationId, config }) {
+async function handleNonStreamingCompletion(req, res, { session, piMessages, model, conversationId, config }) {
   const completionId = `chatcmpl-${uuidv4().replace(/-/g, "").slice(0, 24)}`;
   const created = Math.floor(Date.now() / 1000);
   
@@ -325,10 +330,7 @@ async function handleNonStreamingCompletion(req, res, { session, messages, model
   });
   
   try {
-    // Convert messages and send prompt
-    const { messages: piMessages, systemPrompt } = convertMessages(messages);
-    
-    // Build prompt text from messages
+    // Build prompt text from already-converted messages
     const lastUserMessage = piMessages.filter(m => m.role === "user").pop();
     const userText = lastUserMessage?.content 
       ? (typeof lastUserMessage.content === "string" 

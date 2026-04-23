@@ -18,7 +18,7 @@ const sessions = new Map();
  * @param {string} options.model - Model to use (provider/model format)
  * @param {string} options.agentDir - Pi agent directory
  * @param {AbortSignal} options.signal - Abort signal
- * @returns {Promise<import("@mariozechner/pi-coding-agent").AgentSession>}
+ * @returns {Promise<{session: import("@mariozechner/pi-coding-agent").AgentSession, isNew: boolean}>}
  */
 export async function getSession({ conversationId, model, agentDir, signal }) {
   // Check for existing session
@@ -33,7 +33,7 @@ export async function getSession({ conversationId, model, agentDir, signal }) {
         await existing.setModel(registryModel);
       }
     }
-    return existing;
+    return { session: existing, isNew: false };
   }
   
   // Create agent directory if needed
@@ -89,7 +89,53 @@ export async function getSession({ conversationId, model, agentDir, signal }) {
     });
   }
   
-  return session;
+  return { session, isNew: true };
+}
+
+/**
+ * Replay conversation history into a new session.
+ * Sends all messages to establish context before the actual prompt.
+ * @param {import("@mariozechner/pi-coding-agent").AgentSession} session
+ * @param {Array} messages - Pi format messages
+ */
+export async function replayHistory(session, messages) {
+  // Send all but the last user message to establish context
+  const userMessages = messages.filter(m => m.role === "user");
+  const assistantMessages = messages.filter(m => m.role === "assistant");
+  
+  // Build pairs of user + assistant messages (conversation turns)
+  // We need to send them in order, but only user messages trigger Pi
+  // Assistant messages are already in the session after responses
+  
+  // For now, send user messages sequentially
+  // The session will accumulate context
+  for (let i = 0; i < userMessages.length - 1; i++) {
+    const userMsg = userMessages[i];
+    const text = typeof userMsg.content === "string" 
+      ? userMsg.content 
+      : userMsg.content.filter(c => c.type === "text").map(c => c.text).join("\n");
+    
+    // Send prompt and wait for completion
+    let turnComplete = false;
+    const unsubscribe = session.subscribe((event) => {
+      if (event.type === "turn_end" || event.type === "agent_end") {
+        turnComplete = true;
+      }
+    });
+    
+    try {
+      await session.prompt(text, { expandPromptTemplates: false, source: "rpc" });
+      
+      // Wait for turn to complete
+      const maxWait = 60000; // 1 minute per historical message
+      const startWait = Date.now();
+      while (!turnComplete && Date.now() - startWait < maxWait) {
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+    } finally {
+      unsubscribe();
+    }
+  }
 }
 
 /**
