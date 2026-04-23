@@ -90,7 +90,7 @@ export default function (pi) {
               `Endpoints: /v1/chat/completions, /v1/models`,
             ].join("\n"));
           } else {
-            sendText(pi, `Gateway daemon starting... (pid ${child.pid})`);
+            sendText(pi, "Gateway daemon started. Check `/gateway status` for details.");
           }
         } catch (error) {
           sendText(pi, `Failed to start gateway: ${error.message}`);
