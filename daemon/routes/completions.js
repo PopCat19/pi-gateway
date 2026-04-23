@@ -85,6 +85,17 @@ function extractText(message) {
 }
 
 /**
+ * Extract thinking/reasoning content from message.
+ */
+function extractThinking(message) {
+  if (!message?.content || !Array.isArray(message.content)) return "";
+  return message.content
+    .filter(c => c.type === "thinking")
+    .map(c => c.thinking || "")
+    .join("");
+}
+
+/**
  * OpenAI-compatible chat completions endpoint.
  * Supports both streaming and non-streaming.
  * 
@@ -174,10 +185,12 @@ async function handleStreamingCompletion(req, res, { session, promptText, model,
   const created = Math.floor(Date.now() / 1000);
   
   let sentContent = "";
+  let sentThinking = "";
   let isComplete = false;
   let promptTokens = 0;
   let completionTokens = 0;
   let responseContent = "";
+  let thinkingContent = "";
   
   // Subscribe to session events
   const unsubscribe = session.subscribe((event) => {
@@ -186,11 +199,42 @@ async function handleStreamingCompletion(req, res, { session, promptText, model,
         case "message_update":
           // Streaming update
           if (event.message?.role === "assistant") {
+            // Extract text content
             const fullContent = extractText(event.message);
             responseContent = fullContent;
             
-            const newContent = fullContent.slice(sentContent.length);
+            // Extract thinking content
+            const fullThinking = extractThinking(event.message);
+            thinkingContent = fullThinking;
             
+            // Send thinking content updates
+            const newThinking = fullThinking.slice(sentThinking.length);
+            if (newThinking) {
+              // Buffer and send complete lines for thinking
+              const thinkingLines = newThinking.split("\n");
+              const completeThinkingLines = thinkingLines.slice(0, -1);
+              
+              if (completeThinkingLines.length > 0) {
+                const thinkingToSend = completeThinkingLines.join("\n") + "\n";
+                sentThinking += thinkingToSend;
+                
+                const thinkingChunk = {
+                  id: completionId,
+                  object: "chat.completion.chunk",
+                  created,
+                  model,
+                  choices: [{
+                    index: 0,
+                    delta: { reasoning_content: thinkingToSend },
+                    finish_reason: null,
+                  }],
+                };
+                res.write(`data: ${JSON.stringify(thinkingChunk)}\n\n`);
+              }
+            }
+            
+            // Send text content updates
+            const newContent = fullContent.slice(sentContent.length);
             if (newContent) {
               // Buffer and send only complete lines
               const lines = newContent.split("\n");
@@ -219,7 +263,25 @@ async function handleStreamingCompletion(req, res, { session, promptText, model,
           
         case "message_end":
           if (event.message?.role === "assistant") {
-            // Send any remaining content
+            // Send any remaining thinking content
+            const remainingThinking = thinkingContent.slice(sentThinking.length);
+            if (remainingThinking) {
+              sentThinking += remainingThinking;
+              const thinkingChunk = {
+                id: completionId,
+                object: "chat.completion.chunk",
+                created,
+                model,
+                choices: [{
+                  index: 0,
+                  delta: { reasoning_content: remainingThinking },
+                  finish_reason: null,
+                }],
+              };
+              res.write(`data: ${JSON.stringify(thinkingChunk)}\n\n`);
+            }
+            
+            // Send any remaining text content
             const remaining = responseContent.slice(sentContent.length);
             if (remaining) {
               sentContent += remaining;
@@ -318,6 +380,7 @@ async function handleNonStreamingCompletion(req, res, { session, promptText, mod
   const created = Math.floor(Date.now() / 1000);
   
   let responseContent = "";
+  let thinkingContent = "";
   let promptTokens = 0;
   let completionTokens = 0;
   let isComplete = false;
@@ -329,6 +392,7 @@ async function handleNonStreamingCompletion(req, res, { session, promptText, mod
         case "message_end":
           if (event.message?.role === "assistant") {
             responseContent = extractText(event.message);
+            thinkingContent = extractThinking(event.message);
             if (event.message?.usage) {
               promptTokens = event.message.usage.input || 0;
               completionTokens = event.message.usage.output || 0;
@@ -360,6 +424,17 @@ async function handleNonStreamingCompletion(req, res, { session, promptText, mod
       await new Promise(resolve => setTimeout(resolve, 100));
     }
     
+    // Build response with optional reasoning content
+    const message = {
+      role: "assistant",
+      content: responseContent,
+    };
+    
+    // Include reasoning if present (for models with thinking)
+    if (thinkingContent) {
+      message.reasoning_content = thinkingContent;
+    }
+    
     res.json({
       id: completionId,
       object: "chat.completion",
@@ -367,10 +442,9 @@ async function handleNonStreamingCompletion(req, res, { session, promptText, mod
       model,
       choices: [{
         index: 0,
-        message: {
-          role: "assistant",
-          content: responseContent,
-        },
+        message,
+        finish_reason: "stop",
+      }],
         finish_reason: "stop",
       }],
       usage: {
