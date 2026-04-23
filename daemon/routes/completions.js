@@ -121,7 +121,7 @@ completionsRouter.post("/", async (req, res) => {
     
     // Include system prompt (character card from frontend)
     if (systemPrompt) {
-      promptText = `[Character/Instructions]\n${systemPrompt}\n\n`;
+      promptText = `[SYSTEM INSTRUCTIONS]\n${systemPrompt}\n[/SYSTEM]\n\n`;
     }
     
     // For new sessions with history, prepend context
@@ -136,11 +136,11 @@ completionsRouter.post("/", async (req, res) => {
       }
     }
     
-    // Add the last user message
+    // Add the last user message (the actual prompt)
     const lastUserMessage = piMessages.filter(m => m.role === "user").pop();
     if (lastUserMessage) {
       const userText = extractText(lastUserMessage);
-      promptText += userText;
+      promptText += `[USER]\n${userText}\n[END USER]`;
     }
     
     if (stream) {

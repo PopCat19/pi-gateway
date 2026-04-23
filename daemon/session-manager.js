@@ -102,20 +102,18 @@ export function buildHistoryContext(messages) {
   const parts = [];
   
   for (const msg of messages) {
+    const text = typeof msg.content === "string" 
+      ? msg.content 
+      : (Array.isArray(msg.content) 
+          ? msg.content.filter(c => c.type === "text").map(c => c.text).join("") 
+          : "");
+    
+    if (!text) continue;
+    
     if (msg.role === "user") {
-      const text = typeof msg.content === "string" 
-        ? msg.content 
-        : msg.content.filter(c => c.type === "text").map(c => c.text).join("\n");
-      if (text) {
-        parts.push(`User: ${text}`);
-      }
+      parts.push(`[USER]\n${text}\n[END USER]`);
     } else if (msg.role === "assistant") {
-      const text = extractText(msg);
-      if (text) {
-        parts.push(`Assistant: ${text}`);
-      }
-    } else if (msg.role === "system") {
-      // System messages are handled separately by Pi
+      parts.push(`[ASSISTANT]\n${text}\n[END ASSISTANT]`);
     }
   }
   
