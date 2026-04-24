@@ -76,10 +76,21 @@ function extractText(message) {
   if (!message?.content) return "";
   if (typeof message.content === "string") return message.content;
   if (Array.isArray(message.content)) {
-    return message.content
-      .filter(c => c.type === "text")
-      .map(c => c.text)
-      .join("");
+    const parts = [];
+    
+    for (const block of message.content) {
+      if (block.type === "text") {
+        const text = block.text || "";
+        if (parts.length > 0) {
+          // Add newline between text blocks for readability
+          parts.push("\n", text);
+        } else {
+          parts.push(text);
+        }
+      }
+    }
+    
+    return parts.join("");
   }
   return "";
 }
@@ -89,10 +100,21 @@ function extractText(message) {
  */
 function extractThinking(message) {
   if (!message?.content || !Array.isArray(message.content)) return "";
-  return message.content
-    .filter(c => c.type === "thinking")
-    .map(c => c.thinking || "")
-    .join("");
+  const parts = [];
+  
+  for (const block of message.content) {
+    if (block.type === "thinking") {
+      const text = block.thinking || "";
+      if (parts.length > 0) {
+        // Add newline between thinking blocks for readability
+        parts.push("\n", text);
+      } else {
+        parts.push(text);
+      }
+    }
+  }
+  
+    return parts.join("");
 }
 
 /**
@@ -193,6 +215,7 @@ async function handleStreamingCompletion(req, res, { session, promptText, model,
   let sentContent = "";
   let sentThinking = "";
   let isComplete = false;
+  let hasStartedStreaming = false; // Track if we've sent any content (for separator logic)
   let promptTokens = 0;
   let completionTokens = 0;
   let responseContent = "";
@@ -207,10 +230,25 @@ async function handleStreamingCompletion(req, res, { session, promptText, model,
           if (event.message?.role === "assistant") {
             // Extract text content
             const fullContent = extractText(event.message);
+            
+            // Check if content still starts with what we've sent (handles tool call resets)
+            if (sentContent && !fullContent.startsWith(sentContent)) {
+              // Content structure changed (e.g., after tool execution)
+              // Reset sentContent since previous text may not be in current content
+              sentContent = "";
+            }
+            
             responseContent = fullContent;
             
             // Extract thinking content
             const fullThinking = extractThinking(event.message);
+            
+            // Check if thinking content still starts with what we've sent
+            if (sentThinking && !fullThinking.startsWith(sentThinking)) {
+              // Thinking content structure changed (e.g., after tool execution)
+              sentThinking = "";
+            }
+            
             thinkingContent = fullThinking;
             
             // Send thinking content updates
@@ -223,6 +261,7 @@ async function handleStreamingCompletion(req, res, { session, promptText, model,
               if (completeThinkingLines.length > 0) {
                 const thinkingToSend = completeThinkingLines.join("\n") + "\n";
                 sentThinking += thinkingToSend;
+                hasStartedStreaming = true;
                 
                 const thinkingChunk = {
                   id: completionId,
@@ -249,6 +288,7 @@ async function handleStreamingCompletion(req, res, { session, promptText, model,
               if (completeLines.length > 0) {
                 const textToSend = completeLines.join("\n") + "\n";
                 sentContent += textToSend;
+                hasStartedStreaming = true;
                 
                 const chunk = {
                   id: completionId,
@@ -269,10 +309,31 @@ async function handleStreamingCompletion(req, res, { session, promptText, model,
           
         case "message_end":
           if (event.message?.role === "assistant") {
+            // Always extract final content from message_end to ensure we have everything
+            const finalContent = extractText(event.message);
+            const finalThinking = extractThinking(event.message);
+            
+            // Check content continuity before slicing (handles tool call resets)
+            if (sentContent && !finalContent.startsWith(sentContent)) {
+              sentContent = "";
+            }
+            if (sentThinking && !finalThinking.startsWith(sentThinking)) {
+              sentThinking = "";
+            }
+            
+            // Update our tracking variables if message_end has more content
+            if (finalContent && finalContent !== responseContent) {
+              responseContent = finalContent;
+            }
+            if (finalThinking && finalThinking !== thinkingContent) {
+              thinkingContent = finalThinking;
+            }
+            
             // Send any remaining thinking content
             const remainingThinking = thinkingContent.slice(sentThinking.length);
             if (remainingThinking) {
               sentThinking += remainingThinking;
+              hasStartedStreaming = true;
               const thinkingChunk = {
                 id: completionId,
                 object: "chat.completion.chunk",
@@ -291,6 +352,7 @@ async function handleStreamingCompletion(req, res, { session, promptText, model,
             const remaining = responseContent.slice(sentContent.length);
             if (remaining) {
               sentContent += remaining;
+              hasStartedStreaming = true;
               const chunk = {
                 id: completionId,
                 object: "chat.completion.chunk",
@@ -311,6 +373,34 @@ async function handleStreamingCompletion(req, res, { session, promptText, model,
               completionTokens = event.message.usage.output || 0;
             }
           }
+          break;
+          
+        case "tool_execution_start":
+          // Tool is starting - inject marker into reasoning stream
+          if (event.toolName) {
+            const toolMarker = `\n[${event.toolName}] `;
+            // Don't track in sentThinking - marker is informational only
+            const markerChunk = {
+              id: completionId,
+              object: "chat.completion.chunk",
+              created,
+              model,
+              choices: [{
+                index: 0,
+                delta: { reasoning_content: toolMarker },
+                finish_reason: null,
+              }],
+            };
+            res.write(`data: ${JSON.stringify(markerChunk)}\n\n`);
+          }
+          break;
+          
+        case "tool_execution_update":
+          // Tool execution in progress - continue waiting
+          break;
+          
+        case "tool_execution_end":
+          // Tool finished - content may continue in next message_update
           break;
           
         case "turn_end":
@@ -404,6 +494,12 @@ async function handleNonStreamingCompletion(req, res, { session, promptText, mod
               completionTokens = event.message.usage.output || 0;
             }
           }
+          break;
+        
+        case "tool_execution_start":
+        case "tool_execution_update":
+        case "tool_execution_end":
+          // Tool execution in progress - continue waiting
           break;
           
         case "turn_end":
