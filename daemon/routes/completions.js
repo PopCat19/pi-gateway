@@ -52,11 +52,16 @@ function convertMessages(openaiMessages) {
 
 			case "assistant": {
 				const content = typeof msg.content === "string" ? msg.content : "";
-				messages.push({
+				const assistantMsg = {
 					role: "assistant",
 					content: [{ type: "text", text: content }],
 					timestamp: Date.now(),
-				});
+				};
+				// Preserve reasoning_content from frontend (tool calls, thinking)
+				if (msg.reasoning_content) {
+					assistantMsg.reasoning_content = msg.reasoning_content;
+				}
+				messages.push(assistantMsg);
 				break;
 			}
 

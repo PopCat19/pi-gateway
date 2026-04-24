@@ -95,29 +95,106 @@ export async function getSession({ conversationId, model, agentDir, signal }) {
 /**
  * Build context from conversation history.
  * Returns a formatted context string for the model.
- * @param {Array} messages - Pi format messages
+ * Includes both text content and reasoning_content (where available).
+ * @param {Array} messages - Pi/OpenAI format messages
  * @returns {string} Context string
  */
 export function buildHistoryContext(messages) {
   const parts = [];
   
   for (const msg of messages) {
-    const text = typeof msg.content === "string" 
-      ? msg.content 
-      : (Array.isArray(msg.content) 
-          ? msg.content.filter(c => c.type === "text").map(c => c.text).join("") 
-          : "");
+    // Extract text content
+    const text = extractTextFromMessage(msg);
     
-    if (!text) continue;
+    // Extract reasoning content (tool calls streamed as reasoning_content)
+    const reasoning = extractReasoningFromMessage(msg);
     
     if (msg.role === "user") {
-      parts.push(`[USER]\n${text}\n[END USER]`);
+      if (text) {
+        parts.push(`[USER]\n${text}\n[END USER]`);
+      }
     } else if (msg.role === "assistant") {
-      parts.push(`[ASSISTANT]\n${text}\n[END ASSISTANT]`);
+      // Include reasoning (tool calls) before text if present
+      if (reasoning && text) {
+        parts.push(`[ASSISTANT]\n${reasoning}\n\n${text}\n[END ASSISTANT]`);
+      } else if (reasoning) {
+        parts.push(`[ASSISTANT]\n${reasoning}\n[END ASSISTANT]`);
+      } else if (text) {
+        parts.push(`[ASSISTANT]\n${text}\n[END ASSISTANT]`);
+      }
     }
   }
   
   return parts.join("\n\n");
+}
+
+/**
+ * Extract text content from a message.
+ * Handles both string content and array content formats.
+ */
+function extractTextFromMessage(msg) {
+  if (!msg?.content) return "";
+  
+  // String content
+  if (typeof msg.content === "string") return msg.content;
+  
+  // Array content - extract text blocks
+  if (Array.isArray(msg.content)) {
+    return msg.content
+      .filter(c => c.type === "text")
+      .map(c => c.text)
+      .join("");
+  }
+  
+  return "";
+}
+
+/**
+ * Extract reasoning content from a message.
+ * Handles multiple formats:
+ * - OpenAI: message.reasoning_content field
+ * - OpenAI: content array with type: "reasoning"
+ * - Anthropic: content array with type: "thinking"
+ */
+function extractReasoningFromMessage(msg) {
+  // Direct reasoning_content field (OpenAI streaming format)
+  if (msg.reasoning_content) {
+    return msg.reasoning_content;
+  }
+  
+  // Content array with reasoning block
+  if (Array.isArray(msg?.content)) {
+    const reasoningParts = msg.content
+      .filter(c => c.type === "reasoning" || c.type === "thinking")
+      .map(c => c.thinking || c.text || c.reasoning || "")
+      .filter(Boolean);
+    
+    if (reasoningParts.length > 0) {
+      return reasoningParts.join("\n");
+    }
+    
+    // Also check for text blocks that might contain tool markers
+    // (when frontend sends tool output as regular text)
+    const toolMarkers = msg.content
+      .filter(c => c.type === "text" && isToolMarker(c.text))
+      .map(c => c.text);
+    
+    if (toolMarkers.length > 0) {
+      return toolMarkers.join("\n");
+    }
+  }
+  
+  return "";
+}
+
+/**
+ * Check if text contains tool execution markers.
+ */
+function isToolMarker(text) {
+  if (!text) return false;
+  // Match patterns like [bash], [read], [tool (Xs, exit Y)]
+  return /^\s*\[(bash|read|write|edit|tool_[\w]+)\]/m.test(text) ||
+    /\[(bash|read|write|edit|tool_[\w]+)\s*\([^)]+\)\]/m.test(text);
 }
 
 /**
