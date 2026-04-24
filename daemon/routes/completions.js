@@ -76,9 +76,22 @@ function extractText(message) {
   if (!message?.content) return "";
   if (typeof message.content === "string") return message.content;
   if (Array.isArray(message.content)) {
+    // Find the last tool_use or toolCall block position
+    let lastToolIndex = -1;
+    for (let i = 0; i < message.content.length; i++) {
+      const block = message.content[i];
+      if (block.type === "tool_use" || block.type === "toolCall") {
+        lastToolIndex = i;
+      }
+    }
+    
+    // Only extract text blocks after the last tool block
+    // If no tool blocks, include all text blocks
+    const startIndex = lastToolIndex >= 0 ? lastToolIndex + 1 : 0;
     const parts = [];
     
-    for (const block of message.content) {
+    for (let i = startIndex; i < message.content.length; i++) {
+      const block = message.content[i];
       if (block.type === "text") {
         const text = block.text || "";
         if (parts.length > 0) {
@@ -216,6 +229,9 @@ async function handleStreamingCompletion(req, res, { session, promptText, model,
   let sentThinking = "";
   let isComplete = false;
   let hasStartedStreaming = false; // Track if we've sent any content (for separator logic)
+  const toolStartTimes = new Map(); // Track tool call start times for duration
+  let pendingToolCalls = 0; // Track how many tools are currently running
+  let hasSeenToolCalls = false; // Track if we've had any tool calls this turn
   let promptTokens = 0;
   let completionTokens = 0;
   let responseContent = "";
@@ -228,78 +244,60 @@ async function handleStreamingCompletion(req, res, { session, promptText, model,
         case "message_update":
           // Streaming update
           if (event.message?.role === "assistant") {
-            // Extract text content
-            const fullContent = extractText(event.message);
-            
-            // Check if content still starts with what we've sent (handles tool call resets)
-            if (sentContent && !fullContent.startsWith(sentContent)) {
-              // Content structure changed (e.g., after tool execution)
-              // Reset sentContent since previous text may not be in current content
-              sentContent = "";
+            // Track if we've seen tool calls
+            const hasToolCallsInMessage = Array.isArray(event.message?.content) &&
+              event.message.content.some(b => b.type === "tool_use" || b.type === "toolCall");
+            if (hasToolCallsInMessage) {
+              hasSeenToolCalls = true;
             }
             
-            responseContent = fullContent;
-            
-            // Extract thinking content
+            // Extract thinking content (always goes to reasoning)
             const fullThinking = extractThinking(event.message);
-            
-            // Check if thinking content still starts with what we've sent
             if (sentThinking && !fullThinking.startsWith(sentThinking)) {
-              // Thinking content structure changed (e.g., after tool execution)
               sentThinking = "";
             }
-            
             thinkingContent = fullThinking;
             
-            // Send thinking content updates
             const newThinking = fullThinking.slice(sentThinking.length);
             if (newThinking) {
-              // Buffer and send complete lines for thinking
               const thinkingLines = newThinking.split("\n");
               const completeThinkingLines = thinkingLines.slice(0, -1);
-              
               if (completeThinkingLines.length > 0) {
                 const thinkingToSend = completeThinkingLines.join("\n") + "\n";
                 sentThinking += thinkingToSend;
                 hasStartedStreaming = true;
-                
                 const thinkingChunk = {
                   id: completionId,
                   object: "chat.completion.chunk",
                   created,
                   model,
-                  choices: [{
-                    index: 0,
-                    delta: { reasoning_content: thinkingToSend },
-                    finish_reason: null,
-                  }],
+                  choices: [{ index: 0, delta: { reasoning_content: thinkingToSend }, finish_reason: null }],
                 };
                 res.write(`data: ${JSON.stringify(thinkingChunk)}\n\n`);
               }
             }
             
-            // Send text content updates
+            // Extract text content (always goes to content, including during tools)
+            const fullContent = extractText(event.message);
+            if (sentContent && !fullContent.startsWith(sentContent)) {
+              sentContent = "";
+            }
+            responseContent = fullContent;
+            
             const newContent = fullContent.slice(sentContent.length);
             if (newContent) {
-              // Buffer and send only complete lines
               const lines = newContent.split("\n");
               const completeLines = lines.slice(0, -1);
-              
               if (completeLines.length > 0) {
                 const textToSend = completeLines.join("\n") + "\n";
                 sentContent += textToSend;
                 hasStartedStreaming = true;
-                
                 const chunk = {
                   id: completionId,
                   object: "chat.completion.chunk",
                   created,
                   model,
-                  choices: [{
-                    index: 0,
-                    delta: { content: textToSend },
-                    finish_reason: null,
-                  }],
+                  choices: [{ index: 0, delta: { content: textToSend }, finish_reason: null }],
                 };
                 res.write(`data: ${JSON.stringify(chunk)}\n\n`);
               }
@@ -339,30 +337,25 @@ async function handleStreamingCompletion(req, res, { session, promptText, model,
                 object: "chat.completion.chunk",
                 created,
                 model,
-                choices: [{
-                  index: 0,
-                  delta: { reasoning_content: remainingThinking },
-                  finish_reason: null,
-                }],
+                choices: [{ index: 0, delta: { reasoning_content: remainingThinking }, finish_reason: null }],
               };
               res.write(`data: ${JSON.stringify(thinkingChunk)}\n\n`);
             }
             
             // Send any remaining text content
+            // Final text (after tools) goes to content, intermediate goes to reasoning
             const remaining = responseContent.slice(sentContent.length);
             if (remaining) {
               sentContent += remaining;
               hasStartedStreaming = true;
+              // After tools, remaining text is final - send to content
+              const targetField = hasSeenToolCalls ? "content" : "content";
               const chunk = {
                 id: completionId,
                 object: "chat.completion.chunk",
                 created,
                 model,
-                choices: [{
-                  index: 0,
-                  delta: { content: remaining },
-                  finish_reason: null,
-                }],
+                choices: [{ index: 0, delta: { [targetField]: remaining }, finish_reason: null }],
               };
               res.write(`data: ${JSON.stringify(chunk)}\n\n`);
             }
@@ -376,31 +369,123 @@ async function handleStreamingCompletion(req, res, { session, promptText, model,
           break;
           
         case "tool_execution_start":
-          // Tool is starting - inject marker into reasoning stream
+          // Tool is starting - track state
+          pendingToolCalls++;
+          hasSeenToolCalls = true;
+          toolStartTimes.set(event.toolCallId, Date.now());
+          
           if (event.toolName) {
-            const toolMarker = `\n[${event.toolName}] `;
-            // Don't track in sentThinking - marker is informational only
-            const markerChunk = {
+            // Format args - show full input
+            let argsDisplay = "";
+            if (event.args) {
+              try {
+                const args = typeof event.args === "string" ? JSON.parse(event.args) : event.args;
+                if (event.toolName === "bash" && args.command) {
+                  argsDisplay = args.command;
+                } else if (event.toolName === "read" && args.path) {
+                  argsDisplay = args.path;
+                } else if (event.toolName === "write" && args.path) {
+                  argsDisplay = `${args.path}\n${args.content || ''}`;
+                } else {
+                  const parts = [];
+                  for (const [key, val] of Object.entries(args)) {
+                    if (val !== undefined && val !== null) {
+                      parts.push(`${key}: ${typeof val === "string" ? val : JSON.stringify(val)}`);
+                    }
+                  }
+                  argsDisplay = parts.join("\n");
+                }
+              } catch {
+                argsDisplay = JSON.stringify(event.args);
+              }
+            }
+            
+            const startMarker = `
+
+[${event.toolName}]
+${argsDisplay}
+[pending...]
+`;
+            const startChunk = {
               id: completionId,
               object: "chat.completion.chunk",
               created,
               model,
-              choices: [{
-                index: 0,
-                delta: { reasoning_content: toolMarker },
-                finish_reason: null,
-              }],
+              choices: [{ index: 0, delta: { reasoning_content: startMarker }, finish_reason: null }],
             };
-            res.write(`data: ${JSON.stringify(markerChunk)}\n\n`);
+            res.write(`data: ${JSON.stringify(startChunk)}\n\n`);
           }
           break;
           
         case "tool_execution_update":
-          // Tool execution in progress - continue waiting
+          // Tool execution in progress - could show partial results
           break;
           
         case "tool_execution_end":
-          // Tool finished - content may continue in next message_update
+          // Tool finished - track state
+          pendingToolCalls--;
+          
+          if (event.toolName) {
+            const startTime = toolStartTimes.get(event.toolCallId);
+            const duration = startTime ? ((Date.now() - startTime) / 1000).toFixed(1) : null;
+            toolStartTimes.delete(event.toolCallId);
+            
+            // Extract text content from result
+            let resultText = "";
+            if (event.result !== undefined && event.result !== null) {
+              try {
+                const result = event.result;
+                if (result.content && Array.isArray(result.content)) {
+                  resultText = result.content.filter(c => c.type === "text").map(c => c.text || "").join("\n");
+                } else if (typeof result === "string") {
+                  resultText = result;
+                } else if (result.message) {
+                  resultText = result.message;
+                } else if (result.stdout !== undefined || result.stderr !== undefined) {
+                  resultText = [result.stdout, result.stderr].filter(Boolean).join("\n") || "(no output)";
+                } else {
+                  resultText = JSON.stringify(result, null, 2);
+                }
+              } catch {
+                resultText = String(event.result);
+              }
+            }
+            
+            // Truncate to 30 lines
+            const lines = resultText.split("\n");
+            const truncated = lines.length > 30
+              ? lines.slice(0, 30).join("\n") + `\n... (${lines.length - 30} more lines)`
+              : resultText;
+            
+            // Detect language for code block
+            let codeLang = "";
+            if (event.toolName === "bash") {
+              codeLang = ""; // No language for bash output (plain text)
+            } else if (event.toolName === "read" || event.toolName === "write") {
+              try {
+                const args = typeof event.args === "string" ? JSON.parse(event.args) : event.args;
+                if (args?.path) {
+                  const ext = args.path.split(".").pop()?.toLowerCase();
+                  const langMap = { js: "javascript", ts: "typescript", py: "python", rs: "rust", json: "json", md: "markdown", sh: "bash", yaml: "yaml", yml: "yaml", nix: "nix" };
+                  codeLang = langMap[ext] || "";
+                }
+              } catch {}
+            }
+            
+            const exitCode = event.isError ? (event.result?.exitCode ?? 1) : 0;
+            const durationStr = duration !== null ? `${duration}s` : "?s";
+            
+            // Format: [pending...]\n```lang\n<output>\n```\n[tool (duration, exit X)]\n\n
+            const endMarker = `\`\`\`${codeLang}\n${truncated}\n\`\`\`\n[${event.toolName} (${durationStr}, exit ${exitCode})]\n\n`;
+            const endChunk = {
+              id: completionId,
+              object: "chat.completion.chunk",
+              created,
+              model,
+              choices: [{ index: 0, delta: { reasoning_content: endMarker }, finish_reason: null }],
+            };
+            res.write(`data: ${JSON.stringify(endChunk)}\n\n`);
+          }
           break;
           
         case "turn_end":
