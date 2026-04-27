@@ -105,9 +105,11 @@ pi-gateway migrate <name>      Migrate legacy instance
 ```bash
 # Create a new gateway instance
 pi-gateway create my-api
-pi-gateway edit my-api  # Configure port, model, etc.
+pi-gateway edit my-api # Configure port, model, etc.
 pi-gateway start my-api
 ```
+
+**Auto port assignment:** Ports are automatically assigned starting from 8088. If you create multiple instances, each gets the next available port (8089, 8090, etc.).
 
 **Migrating from legacy:**
 
