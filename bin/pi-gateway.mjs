@@ -31,10 +31,11 @@ function printUsage() {
 	const maxCmdLen = Math.max(...Object.keys(COMMANDS).map(c => c.length));
 	for (const [cmd, info] of Object.entries(COMMANDS)) {
 		const args = info.args.map(a => a.endsWith("?") ? `[${a}]` : `<${a}>`).join(" ");
-		const flags = cmd === "create" ? " [--needed]" : "";
+		const flags = cmd === "create" ? " [--needed] [--port PORT]" : "";
 		console.log(`  ${cmd.padEnd(maxCmdLen + 2)} ${args}${flags}  ${info.desc}`);
 	}
 	console.log("\nInstances are stored in: " + instancesDir);
+	console.log("\nPorts are auto-assigned starting from 8088, or use --port to specify.");
 }
 
 function getInstanceDir(name) {
@@ -78,8 +79,15 @@ function readStatus(workspaceDir) {
 	const paths = getPaths({ workspaceDir });
 	const statusPath = paths.statusPath;
 	const pidPath = paths.pidPath;
+	const configPath = paths.configPath;
 
 	const result = { running: false, pid: null, port: null, status: null };
+
+	// Read config for port (always available)
+	try {
+		const config = JSON.parse(readFileSync(configPath, "utf8"));
+		result.port = config.port;
+	} catch {}
 
 	if (existsSync(pidPath)) {
 		try {
@@ -99,11 +107,32 @@ function readStatus(workspaceDir) {
 	if (existsSync(statusPath)) {
 		try {
 			result.status = JSON.parse(readFileSync(statusPath, "utf8"));
-			result.port = result.status?.port ?? null;
 		} catch {}
 	}
 
 	return result;
+}
+
+function getUsedPorts() {
+	const ports = new Set();
+	for (const inst of listInstances()) {
+		const workspaceDir = inst.isLegacy ? legacyDir : getInstancePath(inst.name);
+		const configPath = path.join(workspaceDir, "config.json");
+		try {
+			const config = JSON.parse(readFileSync(configPath, "utf8"));
+			if (config.port) ports.add(config.port);
+		} catch {}
+	}
+	return ports;
+}
+
+function findAvailablePort(startPort = 8088) {
+	const usedPorts = getUsedPorts();
+	let port = startPort;
+	while (usedPorts.has(port) && port < 65535) {
+		port++;
+	}
+	return port;
 }
 
 function cmdCreate(name, options = {}) {
@@ -124,8 +153,17 @@ function cmdCreate(name, options = {}) {
 	mkdirSync(workspaceDir, { recursive: true });
 
 	const config = createDefaultConfig();
+	
+	// Auto-assign port (explicit --port overrides auto-assignment)
+	if (options.port) {
+		config.port = options.port;
+	} else {
+		config.port = findAvailablePort();
+	}
+
 	writeFileSync(configFile, JSON.stringify(config, null, "\t"));
 	console.log(`Created instance "${name}" at ${instanceDir}`);
+	console.log(`Port: ${config.port}`);
 	console.log(`\nEdit the config to set model and other options:`);
 	console.log(`  ${configFile}`);
 }
@@ -143,11 +181,11 @@ function cmdList() {
 	for (const inst of instances) {
 		const name = inst.isLegacy ? "(legacy)" : inst.name;
 		const workspaceDir = inst.isLegacy ? legacyDir : getInstancePath(inst.name);
-		const { running, pid, port, status } = readStatus(workspaceDir);
-		const state = running ? `running (pid ${pid}${port ? `, port ${port}` : ""})` : "stopped";
+		const { running, pid, port } = readStatus(workspaceDir);
+		const state = running ? `running (pid ${pid})` : "stopped";
 		console.log(`  ${name}`);
 		console.log(`    Status: ${state}`);
-		console.log(`    Workspace: ${workspaceDir}`);
+		if (port) console.log(`    Port: ${port}`);
 		if (inst.isLegacy) {
 			console.log(`    Note: Legacy instance, migrate with: pi-gateway migrate <name>`);
 		}
@@ -248,8 +286,8 @@ function cmdStatus(name) {
 		console.log(`  Running: ${running}`);
 		if (running) {
 			console.log(`  PID: ${pid}`);
-			if (port) console.log(`  Port: ${port}`);
 		}
+		if (port) console.log(`  Port: ${port}`);
 		if (status) console.log(`  Status: ${JSON.stringify(status, null, 2)}`);
 	} else {
 		cmdList();
@@ -367,14 +405,37 @@ async function main() {
 	}
 
 	// Parse flags
-	const flags = { needed: false };
-	const filteredArgs = args.filter(arg => {
+	const flags = { needed: false, port: null };
+	let i = 0;
+	const filteredArgs = [];
+	while (i < args.length) {
+		const arg = args[i];
 		if (arg === "--needed") {
 			flags.needed = true;
-			return false;
+			i++;
+		} else if (arg === "--port") {
+			const portValue = args[i + 1];
+			if (portValue && /^\d+$/.test(portValue)) {
+				flags.port = parseInt(portValue, 10);
+				i += 2;
+			} else {
+				console.error("--port requires a valid port number");
+				process.exit(1);
+			}
+		} else if (arg.startsWith("--port=")) {
+			const portValue = arg.slice(7);
+			if (/^\d+$/.test(portValue)) {
+				flags.port = parseInt(portValue, 10);
+				i++;
+			} else {
+				console.error("--port requires a valid port number");
+				process.exit(1);
+			}
+		} else {
+			filteredArgs.push(arg);
+			i++;
 		}
-		return true;
-	});
+	}
 
 	const [cmd, ...cmdArgs] = filteredArgs;
 
