@@ -5,6 +5,7 @@
   "description": "Expose Pi as an OpenAI-compatible backend for external frontends",
   "main": "index.js",
   "bin": {
+    "pi-gateway": "./bin/pi-gateway.mjs",
     "pi-gateway-server": "./bin/pi-gateway-server.mjs"
   },
   "scripts": {
