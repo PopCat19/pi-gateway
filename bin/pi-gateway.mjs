@@ -78,7 +78,7 @@ function listInstances() {
 function readStatus(workspaceDir) {
 	const paths = getPaths({ workspaceDir });
 	const statusPath = paths.statusPath;
-	const pidPath = paths.pidPath;
+	const lockPath = paths.lockPath;
 	const configPath = paths.configPath;
 
 	const result = { running: false, pid: null, port: null, status: null };
@@ -89,14 +89,14 @@ function readStatus(workspaceDir) {
 		result.port = config.port;
 	} catch {}
 
-	if (existsSync(pidPath)) {
+	if (existsSync(lockPath)) {
 		try {
-			const pid = parseInt(readFileSync(pidPath, "utf8").trim(), 10);
-			if (!isNaN(pid)) {
+			const lock = JSON.parse(readFileSync(lockPath, "utf8"));
+			if (lock.pid) {
 				try {
-					process.kill(pid, 0);
+					process.kill(lock.pid, 0);
 					result.running = true;
-					result.pid = pid;
+					result.pid = lock.pid;
 				} catch {
 					// Process not running
 				}
