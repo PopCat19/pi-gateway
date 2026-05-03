@@ -13,24 +13,6 @@ Expose Pi as an OpenAI-compatible API gateway for any LLM frontend.
 > 
 > New instances are stored in `~/.pi/agent/pi-gateway-instances/`.
 
-## Directory Layout
-
-```
-Source repository (your dev fork):
-  ~/pi-gateway/                # git repo, package.json, source code
-
-Instance directories (runtime data):
-  ~/.pi/agent/pi-gateway-instances/
-    ├── main/workspace/         # config.json (port 8088)
-    └── dev/workspace/          # config.json (port 8089, auto-assigned)
-
-Legacy (pre-multi-instance):
-  ~/.pi/agent/pi-gateway/      # still works, shown as "(legacy)" in CLI
-```
-
-When you `pi install git:github.com/PopCat19/pi-gateway`, pi clones the source repo.
-The `pi-gateway` CLI creates instance directories at runtime.
-
 ## What it does
 
 - Creates an HTTP server with OpenAI-compatible endpoints
@@ -40,8 +22,6 @@ The `pi-gateway` CLI creates instance directories at runtime.
 - Passes character cards and conversation history from frontends
 
 ## Compatible Frontends
-
-Any frontend that supports OpenAI-compatible APIs:
 
 | Frontend | Works |
 |----------|-------|
@@ -62,6 +42,24 @@ Any frontend that supports OpenAI-compatible APIs:
 | `/v1/models` | GET | List available models from Pi |
 | `/v1/models/:id` | GET | Get specific model info |
 | `/health` | GET | Health check |
+
+## Directory Layout
+
+```
+Source repository (your dev fork):
+  ~/pi-gateway/                # git repo, package.json, source code
+
+Instance directories (runtime data):
+  ~/.pi/agent/pi-gateway-instances/
+    ├── main/workspace/         # config.json (port 8088)
+    └── dev/workspace/          # config.json (port 8089, auto-assigned)
+
+Legacy (pre-multi-instance):
+  ~/.pi/agent/pi-gateway/      # still works, shown as "(legacy)" in CLI
+```
+
+When you `pi install git:github.com/PopCat19/pi-gateway`, pi clones the source repo.
+The `pi-gateway` CLI creates instance directories at runtime.
 
 ## Install
 
@@ -103,13 +101,12 @@ pi-gateway migrate <name>      Migrate legacy instance
 **Quick start:**
 
 ```bash
-# Create a new gateway instance
 pi-gateway create my-api
 pi-gateway edit my-api # Configure port, model, etc.
 pi-gateway start my-api
 ```
 
-**Auto port assignment:** Ports are automatically assigned starting from 8088. If you create multiple instances, each gets the next available port (8089, 8090, etc.).
+**Auto port assignment:** Ports are automatically assigned starting from 8088. Multiple instances get 8089, 8090, etc.
 
 **Migrating from legacy:**
 
@@ -148,8 +145,6 @@ Config file: `~/.pi/agent/pi-gateway/config.json`
 }
 ```
 
-### Fields
-
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `port` | number | 8088 | Server port |
@@ -159,10 +154,10 @@ Config file: `~/.pi/agent/pi-gateway/config.json`
 
 ## Frontend Configuration
 
-In your frontend (e.g., SillyTavern), set:
+In your frontend (e.g., SillyTavern):
 - **API type**: OpenAI-compatible
 - **API URL**: `http://localhost:8088/v1`
-- **API key**: (leave empty or set matching config)
+- **API key**: leave empty or set matching config
 - **Model**: any model from `/v1/models` or your configured default
 
 ## Features
@@ -175,8 +170,8 @@ The gateway passes the system prompt (character card) from the frontend to Pi:
 
 ### Conversation History
 
-- New sessions: Full history replayed as context
-- Existing sessions: Context maintained by Pi's session
+- New sessions: full history replayed as context
+- Existing sessions: context maintained by Pi's session
 
 ### Thinking / Reasoning Content
 
@@ -186,7 +181,7 @@ For models that support thinking (Claude extended, DeepSeek R1, etc.):
 
 ## Status
 
-✓ Working — tested with SillyTavern
+✓ Working - tested with SillyTavern
 
 Completed:
 - [x] OpenAI-compatible `/v1/chat/completions` endpoint
@@ -206,3 +201,5 @@ TODO:
 ## License
 
 MIT
+
+<!-- generated: 20260503-9ce5aab -->
