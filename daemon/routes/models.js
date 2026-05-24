@@ -13,7 +13,7 @@ function toOpenAIModel(model) {
     object: "model",
     created: Date.now(),
     owned_by: model.provider,
-    name: model.name || model.id,
+    name: `${model.provider}/${model.name || model.id}`,
   };
 }
 
