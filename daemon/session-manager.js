@@ -3,7 +3,7 @@
  * Manages Pi sessions for incoming requests.
  */
 
-import { createAgentSession, ModelRegistry, AuthStorage, SettingsManager, SessionManager } from "@mariozechner/pi-coding-agent";
+import { createAgentSession, ModelRegistry, AuthStorage, SettingsManager, SessionManager } from "@earendil-works/pi-coding-agent";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { existsSync, mkdirSync } from "node:fs";
@@ -18,8 +18,8 @@ const sessions = new Map();
  * @param {string} options.model - Model to use (provider/model format)
  * @param {string} options.agentDir - Pi agent directory
  * @param {AbortSignal} options.signal - Abort signal
- * @param {import("@mariozechner/pi-coding-agent").ModelRegistry} [options.modelRegistry] - Shared registry
- * @returns {Promise<{session: import("@mariozechner/pi-coding-agent").AgentSession, isNew: boolean}>}
+ * @param {import("@earendil-works/pi-coding-agent").ModelRegistry} [options.modelRegistry] - Shared registry
+ * @returns {Promise<{session: import("@earendil-works/pi-coding-agent").AgentSession, isNew: boolean}>}
  */
 export async function getSession({ conversationId, model, agentDir, signal, modelRegistry: sharedRegistry }) {
   // Check for existing session

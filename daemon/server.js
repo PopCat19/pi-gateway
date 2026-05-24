@@ -2,7 +2,7 @@ import express from "express";
 import { createServer as createHttpServer } from "node:http";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { ModelRegistry, AuthStorage } from "@mariozechner/pi-coding-agent";
+import { ModelRegistry, AuthStorage } from "@earendil-works/pi-coding-agent";
 import { completionsRouter } from "./routes/completions.js";
 import { modelsRouter } from "./routes/models.js";
 
