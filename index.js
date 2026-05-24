@@ -66,6 +66,12 @@ async function writeRuntimeModels(workspaceDir, ctx) {
 }
 
 export default function (pi) {
+  // Keep runtime-models.json in sync with Pi's live model registry
+  pi.on("session_start", async (_event, ctx) => {
+    const paths = getPaths({ agentDir: process.env.PI_AGENT_DIR || ctx?.cwd });
+    await writeRuntimeModels(paths.workspaceDir, ctx);
+  });
+
   pi.registerCommand("gateway", {
     description: "Manage the OpenAI-compatible API gateway: /gateway start|stop|status|config",
     handler: async (input, ctx) => {
