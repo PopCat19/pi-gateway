@@ -31,14 +31,15 @@ function loadRuntimeModels(workspaceDir) {
 }
 
 /**
- * Collect all models: runtime-first (extension-provided), then registry fallback.
+ * Collect all models: runtime-first (extension-provided, always included),
+ * then registry models whose providers have configured auth.
  * Runtime models replace registry models with the same provider+id.
  */
 function collectModels(modelRegistry, runtimeModels) {
   const seen = new Set();
   const models = [];
 
-  // Runtime models first (includes extension-dynamic models)
+  // Runtime models always included (extension-registered, auth verified by Pi)
   for (const m of runtimeModels) {
     if (m.provider && m.id) {
       const key = `${m.provider}/${m.id}`;
@@ -49,12 +50,12 @@ function collectModels(modelRegistry, runtimeModels) {
     }
   }
 
-  // Registry models as fallback
+  // Registry models: only include from configured providers
   if (modelRegistry?.models) {
     for (const m of modelRegistry.models) {
       if (m.provider && m.id) {
         const key = `${m.provider}/${m.id}`;
-        if (!seen.has(key)) {
+        if (!seen.has(key) && modelRegistry.hasConfiguredAuth(m)) {
           seen.add(key);
           models.push(toOpenAIModel(m));
         }
