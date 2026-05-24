@@ -471,8 +471,13 @@ async function main() {
 
 	const { args: expected } = COMMANDS[cmd];
 	const required = expected.filter(a => !a.endsWith("?"));
+	const maxArgs = expected.length;
 	if (cmdArgs.length < required.length) {
 		console.error(`Usage: pi-gateway ${cmd} ${expected.map(a => a.endsWith("?") ? `[${a}]` : `<${a}>`).join(" ")}`);
+		process.exit(1);
+	}
+	if (cmdArgs.length > maxArgs) {
+		console.error(`Too many arguments for ${cmd} (expected ${maxArgs}, got ${cmdArgs.length})`);
 		process.exit(1);
 	}
 
