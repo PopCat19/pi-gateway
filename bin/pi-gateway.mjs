@@ -215,7 +215,27 @@ function cmdStart(name) {
 		stdio: "ignore",
 	});
 	child.unref();
-	console.log(`Started instance "${name}" (pid ${child.pid})`);
+
+	// Give daemon a moment to write its initial status
+	Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500);
+
+	// Verify daemon actually bound its port (status.json shows "running")
+	const startTime = Date.now();
+	while (Date.now() - startTime < 10000) {
+		const { running: nowRunning, status, port } = readStatus(workspaceDir);
+		if (nowRunning && status?.phase === "running") {
+			console.log(`Started instance "${name}" (port ${port})`);
+			return;
+		}
+		if (status?.phase === "stopped") {
+			console.error(`Instance "${name}" failed to start (port ${port || "?"} may be in use).`);
+			process.exit(1);
+		}
+		Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200);
+	}
+
+	console.error(`Instance "${name}" timed out starting.`);
+	process.exit(1);
 }
 
 function cmdStop(name) {
@@ -253,7 +273,7 @@ function cmdRestart(name) {
 	const { running, pid } = readStatus(workspaceDir);
 
 	if (running) {
-		console.log(`Stopping instance "${name}"...`);
+		console.log(`Stopping instance "${name}" (pid ${pid})...`);
 		try {
 			process.kill(pid, "SIGTERM");
 			let attempts = 0;
@@ -268,6 +288,10 @@ function cmdRestart(name) {
 			}
 		} catch {}
 	}
+
+	// Clean stale state from previous run
+	try { rmSync(path.join(workspaceDir, "run", "status.json")); } catch {}
+	try { rmSync(path.join(workspaceDir, "run", "daemon.lock")); } catch {}
 
 	cmdStart(name);
 }

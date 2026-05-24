@@ -67,7 +67,7 @@ modelsRouter.get("/", async (req, res) => {
 /**
  * GET /v1/models/:id - Get specific model
  */
-modelsRouter.get("/:id", async (req, res) => {
+modelsRouter.get("/:id(*)", async (req, res) => {
   const { id } = req.params;
   const models = await loadModelsFromPi();
   const model = models.find(m => m.id === id);

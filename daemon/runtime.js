@@ -13,6 +13,7 @@ export class PiGatewayDaemon {
     this.config = config;
     this.server = null;
     this.stopping = false;
+    this.lockAcquired = false;
     this.status = { phase: "initialized" };
   }
 
@@ -55,12 +56,15 @@ export class PiGatewayDaemon {
   }
 
   async releaseLock() {
+    if (!this.lockAcquired) return;
     await removeIfExists(this.paths.pidPath);
     await removeIfExists(this.paths.lockPath);
+    this.lockAcquired = false;
   }
 
   async start() {
     await this.acquireLock();
+    this.lockAcquired = true;
     await this.writeStatus({ phase: "starting", pid: process.pid });
 
     this.server = await createServer({ paths: this.paths, config: this.config });
