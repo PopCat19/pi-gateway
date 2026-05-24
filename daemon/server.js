@@ -1,5 +1,8 @@
 import express from "express";
 import { createServer as createHttpServer } from "node:http";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { ModelRegistry, AuthStorage } from "@mariozechner/pi-coding-agent";
 import { completionsRouter } from "./routes/completions.js";
 import { modelsRouter } from "./routes/models.js";
 
@@ -35,9 +38,14 @@ export async function createServer({ paths, config }) {
     });
   }
   
+  // Create shared model registry for routes
+  const piAgentDir = paths.agentDir || join(homedir(), ".pi", "agent");
+  const authStorage = await AuthStorage.create(join(piAgentDir, "auth.json"));
+  const modelRegistry = await ModelRegistry.create(authStorage, join(piAgentDir, "models.json"));
+
   // Request context
   app.use((req, res, next) => {
-    req.context = { paths, config };
+    req.context = { paths, config, modelRegistry, piAgentDir };
     next();
   });
   

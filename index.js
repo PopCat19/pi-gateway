@@ -3,7 +3,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { readFile, access } from "node:fs/promises";
+import { readFile, access, writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadConfig, validateConfig } from "./lib/config.js";
@@ -45,6 +45,26 @@ async function isProcessRunning(pid) {
   }
 }
 
+/**
+ * Serialize all models from ctx.modelRegistry (includes extension-registered providers)
+ * to a runtime-models.json file that the daemon reads.
+ */
+async function writeRuntimeModels(workspaceDir, ctx) {
+  if (!ctx?.modelRegistry?.models) return;
+  try {
+    await mkdir(workspaceDir, { recursive: true });
+    const models = ctx.modelRegistry.models
+      .filter(m => m.provider && m.id)
+      .map(m => ({ provider: m.provider, id: m.id, name: m.name || m.id }));
+    await writeFile(
+      path.join(workspaceDir, "runtime-models.json"),
+      JSON.stringify(models),
+    );
+  } catch (err) {
+    console.error("[pi-gateway] Failed to write runtime models:", err.message);
+  }
+}
+
 export default function (pi) {
   pi.registerCommand("gateway", {
     description: "Manage the OpenAI-compatible API gateway: /gateway start|stop|status|config",
@@ -70,6 +90,9 @@ export default function (pi) {
             return;
           }
           
+          // Write runtime models (includes extension-registered providers)
+          await writeRuntimeModels(paths.workspaceDir, ctx);
+
           // Spawn daemon as detached background process
           const child = spawn("node", [daemonBin, "--workspace", paths.workspaceDir], {
             detached: true,

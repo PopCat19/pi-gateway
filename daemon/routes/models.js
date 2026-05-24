@@ -1,55 +1,82 @@
-import { Router } from "express";
-import { readFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { Router } from "express";
 
 export const modelsRouter = Router();
 
 /**
- * Load models from Pi's models.json
+ * Convert a Pi model registry entry to an OpenAI model object.
  */
-async function loadModelsFromPi() {
-  const modelsPath = join(homedir(), ".pi/agent/models.json");
-  
+function toOpenAIModel(model) {
+  return {
+    id: `${model.provider}/${model.id}`,
+    object: "model",
+    created: Date.now(),
+    owned_by: model.provider,
+    name: model.name || model.id,
+  };
+}
+
+/**
+ * Load runtime models written by the gateway extension (includes extension-registered providers).
+ */
+function loadRuntimeModels(workspaceDir) {
+  const runtimePath = join(workspaceDir, "runtime-models.json");
+  if (!existsSync(runtimePath)) return [];
   try {
-    const content = await readFile(modelsPath, "utf-8");
-    const config = JSON.parse(content);
-    const models = [];
-    
-    if (config.providers) {
-      for (const [providerName, provider] of Object.entries(config.providers)) {
-        if (provider.models) {
-          for (const model of provider.models) {
-            models.push({
-              id: `${providerName}/${model.id}`,
-              object: "model",
-              created: Date.now(),
-              owned_by: providerName,
-              name: model.name || model.id,
-            });
-          }
-        }
-      }
-    }
-    
-    return models;
-  } catch (error) {
-    console.error("Failed to load models from Pi:", error.message);
+    return JSON.parse(readFileSync(runtimePath, "utf-8"));
+  } catch {
     return [];
   }
 }
 
 /**
- * GET /v1/models - List available models
- * Any OpenAI-compatible frontend expects this format
+ * Collect all models: runtime-first (extension-provided), then registry fallback.
+ * Runtime models replace registry models with the same provider+id.
  */
-modelsRouter.get("/", async (req, res) => {
-  const { config } = req.context;
-  const models = await loadModelsFromPi();
-  
-  // Add default model if configured and not already in list
+function collectModels(modelRegistry, runtimeModels) {
+  const seen = new Set();
+  const models = [];
+
+  // Runtime models first (includes extension-dynamic models)
+  for (const m of runtimeModels) {
+    if (m.provider && m.id) {
+      const key = `${m.provider}/${m.id}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        models.push(toOpenAIModel(m));
+      }
+    }
+  }
+
+  // Registry models as fallback
+  if (modelRegistry?.models) {
+    for (const m of modelRegistry.models) {
+      if (m.provider && m.id) {
+        const key = `${m.provider}/${m.id}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          models.push(toOpenAIModel(m));
+        }
+      }
+    }
+  }
+
+  return models;
+}
+
+/**
+ * GET /v1/models - List all models (extension registrations + built-in + custom).
+ */
+modelsRouter.get("/", (req, res) => {
+  const { config, modelRegistry, paths } = req.context;
+  const workspaceDir = paths?.workspaceDir || "";
+  const runtimeModels = loadRuntimeModels(workspaceDir);
+  const models = collectModels(modelRegistry, runtimeModels);
+
+  // Ensure default model is present
   if (config.defaultModel && !models.find(m => m.id === config.defaultModel)) {
-    const [provider, ...modelParts] = config.defaultModel.split("/");
+    const [provider] = config.defaultModel.split("/");
     models.push({
       id: config.defaultModel,
       object: "model",
@@ -57,7 +84,7 @@ modelsRouter.get("/", async (req, res) => {
       owned_by: provider || "pi",
     });
   }
-  
+
   res.json({
     object: "list",
     data: models,
@@ -65,23 +92,25 @@ modelsRouter.get("/", async (req, res) => {
 });
 
 /**
- * GET /v1/models/:id - Get specific model
+ * GET /v1/models/:id - Get a specific model.
  */
-modelsRouter.get("/:id(*)", async (req, res) => {
+modelsRouter.get("/:id(*)", (req, res) => {
+  const { modelRegistry, paths } = req.context;
+  const workspaceDir = paths?.workspaceDir || "";
+  const runtimeModels = loadRuntimeModels(workspaceDir);
+  const models = collectModels(modelRegistry, runtimeModels);
   const { id } = req.params;
-  const models = await loadModelsFromPi();
   const model = models.find(m => m.id === id);
-  
+
   if (model) {
-    res.json(model);
-  } else {
-    // Return basic model info even if not in registry
-    const [provider] = id.split("/");
-    res.json({
-      id,
-      object: "model",
-      created: Date.now(),
-      owned_by: provider || "pi",
-    });
+    return res.json(model);
   }
+
+  const [provider] = id.split("/");
+  res.json({
+    id,
+    object: "model",
+    created: Date.now(),
+    owned_by: provider || "pi",
+  });
 });

@@ -159,7 +159,7 @@ function extractThinking(message) {
  * POST /v1/chat/completions
  */
 completionsRouter.post("/", async (req, res) => {
-	const { paths, config } = req.context;
+	const { paths, config, modelRegistry } = req.context;
 	const {
 		messages,
 		model,
@@ -192,6 +192,7 @@ completionsRouter.post("/", async (req, res) => {
 			model: modelId,
 			agentDir: paths?.agentDir,
 			signal: req.signal,
+			modelRegistry,
 		});
 
 		// Convert messages to Pi format

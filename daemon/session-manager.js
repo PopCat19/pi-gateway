@@ -18,9 +18,10 @@ const sessions = new Map();
  * @param {string} options.model - Model to use (provider/model format)
  * @param {string} options.agentDir - Pi agent directory
  * @param {AbortSignal} options.signal - Abort signal
+ * @param {import("@mariozechner/pi-coding-agent").ModelRegistry} [options.modelRegistry] - Shared registry
  * @returns {Promise<{session: import("@mariozechner/pi-coding-agent").AgentSession, isNew: boolean}>}
  */
-export async function getSession({ conversationId, model, agentDir, signal }) {
+export async function getSession({ conversationId, model, agentDir, signal, modelRegistry: sharedRegistry }) {
   // Check for existing session
   const existing = sessions.get(conversationId);
   if (existing && !signal?.aborted) {
@@ -49,11 +50,12 @@ export async function getSession({ conversationId, model, agentDir, signal }) {
   const [provider, ...modelParts] = (model || "").split("/");
   const modelId = modelParts.join("/");
   
-  // Create auth storage
-  const authStorage = await AuthStorage.create(join(piAgentDir, "auth.json"));
-  
-  // Create model registry
-  const modelRegistry = await ModelRegistry.create(authStorage, join(piAgentDir, "models.json"));
+  // Use shared registry or create a standalone one
+  let modelRegistry = sharedRegistry || null;
+  if (!modelRegistry) {
+    const authStorage = await AuthStorage.create(join(piAgentDir, "auth.json"));
+    modelRegistry = await ModelRegistry.create(authStorage, join(piAgentDir, "models.json"));
+  }
   
   // Find the model
   let resolvedModel = null;
