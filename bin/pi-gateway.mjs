@@ -15,9 +15,9 @@ const legacyDir = path.join(agentDir, "pi-gateway");
 const COMMANDS = {
 	create: { args: ["name"], desc: "Create a new instance with default config" },
 	list: { args: [], desc: "List all instances" },
-	start: { args: ["name"], desc: "Start an instance" },
-	stop: { args: ["name"], desc: "Stop an instance" },
-	restart: { args: ["name"], desc: "Restart an instance" },
+	start: { args: ["name..."], desc: "Start one or more instances" },
+	stop: { args: ["name..."], desc: "Stop one or more instances" },
+	restart: { args: ["name..."], desc: "Restart one or more instances" },
 	status: { args: ["name?"], desc: "Show status of instance(s)" },
 	edit: { args: ["name"], desc: "Open instance config in editor" },
 	remove: { args: ["name"], desc: "Remove an instance" },
@@ -470,13 +470,14 @@ async function main() {
 	}
 
 	const { args: expected } = COMMANDS[cmd];
-	const required = expected.filter(a => !a.endsWith("?"));
-	const maxArgs = expected.length;
-	if (cmdArgs.length < required.length) {
-		console.error(`Usage: pi-gateway ${cmd} ${expected.map(a => a.endsWith("?") ? `[${a}]` : `<${a}>`).join(" ")}`);
+	const required = expected.filter(a => !a.endsWith("?") && !a.endsWith("..."));
+	const variadic = expected.some(a => a.endsWith("..."));
+	const maxArgs = variadic ? Infinity : expected.length;
+	if (cmdArgs.length < required.length || (!variadic && cmdArgs.length === 0 && required.length > 0)) {
+		console.error(`Usage: pi-gateway ${cmd} ${expected.map(a => a.endsWith("?") ? `[${a}]` : a.endsWith("...") ? `<${a}>` : `<${a}>`).join(" ")}`);
 		process.exit(1);
 	}
-	if (cmdArgs.length > maxArgs) {
+	if (!variadic && cmdArgs.length > maxArgs) {
 		console.error(`Too many arguments for ${cmd} (expected ${maxArgs}, got ${cmdArgs.length})`);
 		process.exit(1);
 	}
@@ -489,13 +490,13 @@ async function main() {
 			cmdList();
 			break;
 		case "start":
-			cmdStart(cmdArgs[0]);
+			for (const name of cmdArgs) cmdStart(name);
 			break;
 		case "stop":
-			cmdStop(cmdArgs[0]);
+			for (const name of cmdArgs) cmdStop(name);
 			break;
 		case "restart":
-			cmdRestart(cmdArgs[0]);
+			for (const name of cmdArgs) cmdRestart(name);
 			break;
 		case "status":
 			cmdStatus(cmdArgs[0]);
