@@ -47,17 +47,19 @@ async function isProcessRunning(pid) {
 
 /**
  * Serialize all models from ctx.modelRegistry (includes extension-registered providers)
- * to a runtime-models.json file that the daemon reads.
+ * to runtime-models.json in the central location (shared by all daemon instances).
  */
-async function writeRuntimeModels(workspaceDir, ctx) {
+async function writeRuntimeModels(agentDir, ctx) {
   if (!ctx?.modelRegistry?.models) return;
   try {
-    await mkdir(workspaceDir, { recursive: true });
+    const dir = path.join(agentDir, "pi-gateway");
+    await mkdir(dir, { recursive: true });
+    // Only write models from configured providers
     const models = ctx.modelRegistry.models
-      .filter(m => m.provider && m.id)
+      .filter(m => m.provider && m.id && ctx.modelRegistry.hasConfiguredAuth(m))
       .map(m => ({ provider: m.provider, id: m.id, name: m.name || m.id }));
     await writeFile(
-      path.join(workspaceDir, "runtime-models.json"),
+      path.join(dir, "runtime-models.json"),
       JSON.stringify(models),
     );
   } catch (err) {
@@ -68,8 +70,8 @@ async function writeRuntimeModels(workspaceDir, ctx) {
 export default function (pi) {
   // Keep runtime-models.json in sync with Pi's live model registry
   pi.on("session_start", async (_event, ctx) => {
-    const paths = getPaths({ agentDir: process.env.PI_AGENT_DIR || ctx?.cwd });
-    await writeRuntimeModels(paths.workspaceDir, ctx);
+    const agentDir = process.env.PI_AGENT_DIR || ctx?.cwd;
+    await writeRuntimeModels(agentDir, ctx);
   });
 
   pi.registerCommand("gateway", {
@@ -97,7 +99,7 @@ export default function (pi) {
           }
           
           // Write runtime models (includes extension-registered providers)
-          await writeRuntimeModels(paths.workspaceDir, ctx);
+          await writeRuntimeModels(paths.agentDir, ctx);
 
           // Spawn daemon as detached background process
           const child = spawn("node", [daemonBin, "--workspace", paths.workspaceDir], {

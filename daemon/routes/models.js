@@ -18,10 +18,10 @@ function toOpenAIModel(model) {
 }
 
 /**
- * Load runtime models written by the gateway extension (includes extension-registered providers).
+ * Load runtime models from the central location (written by the gateway extension).
  */
-function loadRuntimeModels(workspaceDir) {
-  const runtimePath = join(workspaceDir, "runtime-models.json");
+function loadRuntimeModels(paths) {
+  const runtimePath = join(paths.agentDir || "", "pi-gateway", "runtime-models.json");
   if (!existsSync(runtimePath)) return [];
   try {
     return JSON.parse(readFileSync(runtimePath, "utf-8"));
@@ -71,8 +71,7 @@ function collectModels(modelRegistry, runtimeModels) {
  */
 modelsRouter.get("/", (req, res) => {
   const { config, modelRegistry, paths } = req.context;
-  const workspaceDir = paths?.workspaceDir || "";
-  const runtimeModels = loadRuntimeModels(workspaceDir);
+  const runtimeModels = loadRuntimeModels(paths);
   const models = collectModels(modelRegistry, runtimeModels);
 
   // Ensure default model is present
@@ -97,8 +96,7 @@ modelsRouter.get("/", (req, res) => {
  */
 modelsRouter.get("/:id(*)", (req, res) => {
   const { modelRegistry, paths } = req.context;
-  const workspaceDir = paths?.workspaceDir || "";
-  const runtimeModels = loadRuntimeModels(workspaceDir);
+  const runtimeModels = loadRuntimeModels(paths);
   const models = collectModels(modelRegistry, runtimeModels);
   const { id } = req.params;
   const model = models.find(m => m.id === id);
