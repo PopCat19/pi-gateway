@@ -50,10 +50,12 @@ export async function getSession({ conversationId, model, agentDir, signal, mode
   const [provider, ...modelParts] = (model || "").split("/");
   const modelId = modelParts.join("/");
   
+  // Always create authStorage (needed for createAgentSession)
+  const authStorage = await AuthStorage.create(join(piAgentDir, "auth.json"));
+
   // Use shared registry or create a standalone one
   let modelRegistry = sharedRegistry || null;
   if (!modelRegistry) {
-    const authStorage = await AuthStorage.create(join(piAgentDir, "auth.json"));
     modelRegistry = await ModelRegistry.create(authStorage, join(piAgentDir, "models.json"));
   }
   
