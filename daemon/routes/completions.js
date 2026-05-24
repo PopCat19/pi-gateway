@@ -492,7 +492,9 @@ async function handleStreamingCompletion(
 						const startMarker = `
 
 [${event.toolName}]
+\`\`\`
 ${argsDisplay}
+\`\`\`
 [pending...]
 `;
 						const startChunk = {
