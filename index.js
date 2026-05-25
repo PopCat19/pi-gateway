@@ -70,7 +70,7 @@ async function writeRuntimeModels(agentDir, ctx) {
 export default function (pi) {
   // Keep runtime-models.json in sync with Pi's live model registry
   const sync = async (ctx) => {
-    const agentDir = process.env.PI_AGENT_DIR || ctx?.cwd;
+    const agentDir = process.env.PI_AGENT_DIR || ctx?.agentDir;
     await writeRuntimeModels(agentDir, ctx);
   };
   pi.on("session_start", async (_event, ctx) => sync(ctx));
