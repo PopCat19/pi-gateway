@@ -7,3 +7,4 @@ run/
 sessions/
 core.*
 pi-gateway/
+**/runtime-models.json
