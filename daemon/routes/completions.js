@@ -211,7 +211,7 @@ completionsRouter.post("/", async (req, res) => {
 
 		// Include system prompt if available
 		if (systemPrompt) {
-			promptText = `[SYSTEM INSTRUCTIONS]\n${systemPrompt}\n[/SYSTEM]\n\n`;
+			promptText = `<|im_start|>system\n${systemPrompt}<|im_end|>\n`;
 		}
 
 		// For new sessions with history, prepend context
@@ -221,7 +221,7 @@ completionsRouter.post("/", async (req, res) => {
 			if (historyMessages.length > 0) {
 				const historyContext = buildHistoryContext(historyMessages);
 				if (historyContext) {
-					promptText += `[Previous conversation]\n${historyContext}\n\n`;
+					promptText += `${historyContext}\n`;
 				}
 			}
 		}
@@ -230,7 +230,7 @@ completionsRouter.post("/", async (req, res) => {
 		const lastUserMessage = piMessages.filter((m) => m.role === "user").pop();
 		if (lastUserMessage) {
 			const userText = extractText(lastUserMessage);
-			promptText += `[USER]\n${userText}`;
+			promptText += `<|im_start|>user\n${userText}<|im_end|>`;
 		}
 
 		if (stream) {
