@@ -115,16 +115,16 @@ export function buildHistoryContext(messages) {
     
     if (msg.role === "user") {
       if (text) {
-        parts.push(`[USER]\n${text}\n[END USER]`);
+        parts.push(`[USER]\n${text}`);
       }
     } else if (msg.role === "assistant") {
       // Include reasoning (tool calls) before text if present
       if (reasoning && text) {
-        parts.push(`[ASSISTANT]\n${reasoning}\n\n${text}\n[END ASSISTANT]`);
+        parts.push(`[ASSISTANT]\n${reasoning}\n\n${text}`);
       } else if (reasoning) {
-        parts.push(`[ASSISTANT]\n${reasoning}\n[END ASSISTANT]`);
+        parts.push(`[ASSISTANT]\n${reasoning}`);
       } else if (text) {
-        parts.push(`[ASSISTANT]\n${text}\n[END ASSISTANT]`);
+        parts.push(`[ASSISTANT]\n${text}`);
       }
     }
   }

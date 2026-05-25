@@ -230,7 +230,7 @@ completionsRouter.post("/", async (req, res) => {
 		const lastUserMessage = piMessages.filter((m) => m.role === "user").pop();
 		if (lastUserMessage) {
 			const userText = extractText(lastUserMessage);
-			promptText += `[USER]\n${userText}\n[END USER]`;
+			promptText += `[USER]\n${userText}`;
 		}
 
 		if (stream) {
