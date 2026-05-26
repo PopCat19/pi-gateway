@@ -50,7 +50,7 @@ async function isProcessRunning(pid) {
  * to runtime-models.json in the central location (shared by all daemon instances).
  */
 async function writeRuntimeModels(agentDir, ctx) {
-  if (!ctx?.modelRegistry?.models) return;
+  if (!agentDir || !ctx?.modelRegistry?.models) return;
   try {
     const dir = path.join(agentDir, "pi-gateway");
     await mkdir(dir, { recursive: true });
