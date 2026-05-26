@@ -105,31 +105,37 @@ export async function getSession({ conversationId, model, agentDir, signal, mode
  */
 export function buildHistoryContext(messages) {
   const parts = [];
-  
+
   for (const msg of messages) {
-    // Extract text content
     const text = extractTextFromMessage(msg);
-    
-    // Extract reasoning content (tool calls streamed as reasoning_content)
     const reasoning = extractReasoningFromMessage(msg);
-    
+
     if (msg.role === "user") {
-      if (text) {
-        parts.push(`Previous user: ${text}`);
+      if (text || reasoning) {
+        const label = msg.name ? `User (${msg.name})` : "User";
+        parts.push(`${label}: ${text || reasoning}`);
       }
     } else if (msg.role === "assistant") {
-      // Include reasoning (tool calls) before text if present
-      if (reasoning && text) {
-        parts.push(`Previous assistant: ${reasoning}\n\n${text}`);
-      } else if (reasoning) {
-        parts.push(`Previous assistant: ${reasoning}`);
-      } else if (text) {
-        parts.push(`Previous assistant: ${text}`);
+      if (text || reasoning) {
+        const label = msg.name ? `Assistant (${msg.name})` : "Assistant";
+        if (reasoning && text) {
+          parts.push(`${label}: ${reasoning}\n\n${text}`);
+        } else if (reasoning) {
+          parts.push(`${label}: ${reasoning}`);
+        } else if (text) {
+          parts.push(`${label}: ${text}`);
+        }
+      }
+    } else if (msg.role === "toolResult") {
+      if (text) {
+        parts.push(`Tool (${msg.toolName || "unknown"}): ${text}`);
       }
     }
   }
-  
-  return parts.join("\n");
+
+  if (parts.length === 0) return "";
+
+  return `[Conversation history — continue from here, responding ONLY as the assistant:]\n\n${parts.join("\n\n")}`;
 }
 
 /**
@@ -138,18 +144,18 @@ export function buildHistoryContext(messages) {
  */
 function extractTextFromMessage(msg) {
   if (!msg?.content) return "";
-  
+
   // String content
   if (typeof msg.content === "string") return msg.content;
-  
+
   // Array content - extract text blocks
   if (Array.isArray(msg.content)) {
     return msg.content
-      .filter(c => c.type === "text")
-      .map(c => c.text)
-      .join("");
+      .filter((c) => c?.type === "text")
+      .map((c) => c.text)
+      .join("\n");
   }
-  
+
   return "";
 }
 

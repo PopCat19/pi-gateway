@@ -17,38 +17,42 @@ function convertMessages(openaiMessages) {
 				systemPrompt = typeof msg.content === "string" ? msg.content : "";
 				break;
 
-			case "user":
-				messages.push({
+			case "user": {
+				const userMsg = {
 					role: "user",
 					content:
-						typeof msg.content === "string"
+						msg.content && typeof msg.content === "string"
 							? msg.content
-							: msg.content
+							: (msg.content || [])
 									.map((c) => {
-										if (c.type === "text")
-											return { type: "text", text: c.text };
-										if (c.type === "image_url") {
-											const url = c.image_url?.url || "";
-											// Handle base64 data URLs
-											if (url.startsWith("data:")) {
-												const match = url.match(/^data:([^;]+);base64,(.+)$/);
-												if (match) {
-													return {
-														type: "image",
-														mimeType: match[1],
-														data: match[2],
-													};
+											if (!c) return null;
+											if (c.type === "text")
+												return { type: "text", text: c.text };
+											if (c.type === "image_url") {
+												const url = c.image_url?.url || "";
+												// Handle base64 data URLs
+												if (url.startsWith("data:")) {
+													const match = url.match(/^data:([^;]+);base64,(.+)$/);
+													if (match) {
+														return {
+															type: "image",
+															mimeType: match[1],
+															data: match[2],
+														};
+													}
 												}
+												// For external URLs, we'd need to fetch - skip for now
+												return null;
 											}
-											// For external URLs, we'd need to fetch - skip for now
 											return null;
-										}
-										return null;
-									})
-									.filter(Boolean),
+										})
+										.filter(Boolean),
 					timestamp: Date.now(),
-				});
+				};
+				if (msg.name) userMsg.name = msg.name;
+				messages.push(userMsg);
 				break;
+			}
 
 			case "assistant": {
 				const content = typeof msg.content === "string" ? msg.content : "";
@@ -214,23 +218,31 @@ completionsRouter.post("/", async (req, res) => {
 			promptText = `${systemPrompt}\n\n`;
 		}
 
+		// Determine the boundary between history and the current prompt.
+		// Use the last user message as the active prompt; everything before it is history.
+		const lastUserIndex = piMessages.map((m) => m.role).lastIndexOf("user");
+		const historyMessages =
+			lastUserIndex > 0 ? piMessages.slice(0, lastUserIndex) : [];
+		const lastUserMessage =
+			lastUserIndex >= 0 ? piMessages[lastUserIndex] : undefined;
+
 		// For new sessions with history, prepend context
-		if (isNew && piMessages.length > 1) {
-			// Get all but last user message (that's the new prompt)
-			const historyMessages = piMessages.slice(0, -1);
-			if (historyMessages.length > 0) {
-				const historyContext = buildHistoryContext(historyMessages);
-				if (historyContext) {
-					promptText += `[Conversation history — do not repeat, only continue:]\n${historyContext}\n\n`;
-				}
+		if (isNew && historyMessages.length > 0) {
+			const historyContext = buildHistoryContext(historyMessages);
+			if (historyContext) {
+				promptText += `${historyContext}\n\n`;
 			}
 		}
 
-		// Add the last user message (the actual prompt)
-		const lastUserMessage = piMessages.filter((m) => m.role === "user").pop();
+		// Add the last user message with an explicit assistant continuation marker
 		if (lastUserMessage) {
 			const userText = extractText(lastUserMessage);
-			promptText += userText;
+			const userName = lastUserMessage.name || "User";
+			if (userText.trim()) {
+				promptText += `${userName}: ${userText.trim()}\n\nAssistant:`;
+			} else {
+				promptText += `Assistant:`;
+			}
 		}
 
 		if (stream) {
