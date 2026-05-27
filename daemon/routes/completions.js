@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { v4 as uuidv4 } from "uuid";
-import { buildHistoryContext, getSession } from "../session-manager.js";
+import { getSession, convertToAgentMessage } from "../session-manager.js";
 
 export const completionsRouter = Router();
 
@@ -197,26 +197,12 @@ completionsRouter.post("/", async (req, res) => {
 			agentDir: paths?.agentDir,
 			signal: req.signal,
 			modelRegistry,
+			enableTools: config.enableTools,
 		});
 
 		// Convert messages to Pi format
 		const { messages: piMessages, systemPrompt: frontendSystemPrompt } =
 			convertMessages(messages);
-
-		// Build prompt text
-		let promptText = "";
-
-		// Determine system prompt source
-		// useThreadPersona: true = let thread history define persona (no injected system prompt)
-		// useThreadPersona: false = use config systemPrompt as fallback
-		const systemPrompt =
-			frontendSystemPrompt ||
-			(config.useThreadPersona ? undefined : config.systemPrompt);
-
-		// Include system prompt if available
-		if (systemPrompt) {
-			promptText = `${systemPrompt}\n\n`;
-		}
 
 		// Determine the boundary between history and the current prompt.
 		// Use the last user message as the active prompt; everything before it is history.
@@ -226,24 +212,34 @@ completionsRouter.post("/", async (req, res) => {
 		const lastUserMessage =
 			lastUserIndex >= 0 ? piMessages[lastUserIndex] : undefined;
 
-		// For new sessions with history, prepend context
+		// Override Pi's default coding-assistant system prompt with the frontend's persona.
+		// This prevents the model from impersonating Pi's internal agent identity.
+		// useThreadPersona: true = let thread history define persona (no injected system prompt)
+		// useThreadPersona: false = use config systemPrompt as fallback
+		const effectiveSystemPrompt =
+			frontendSystemPrompt ||
+			(config.useThreadPersona ? "" : config.systemPrompt) ||
+			"";
+		session._baseSystemPrompt = effectiveSystemPrompt;
+		session.agent.state.systemPrompt = effectiveSystemPrompt;
+
+		// For new sessions, seed prior conversation turns as structured messages
+		// instead of flattening them into prompt text. This eliminates role-label
+		// confusion that causes the model to impersonate the user.
 		if (isNew && historyMessages.length > 0) {
-			const historyContext = buildHistoryContext(historyMessages);
-			if (historyContext) {
-				promptText += `${historyContext}\n\n`;
+			for (const msg of historyMessages) {
+				const agentMsg = convertToAgentMessage(msg, session.model);
+				if (agentMsg) {
+					session.sessionManager.appendMessage(agentMsg);
+				}
 			}
+			const seededContext = session.sessionManager.buildSessionContext();
+			session.agent.state.messages = seededContext.messages;
 		}
 
-		// Add the last user message with an explicit assistant continuation marker
-		if (lastUserMessage) {
-			const userText = extractText(lastUserMessage);
-			const userName = lastUserMessage.name || "User";
-			if (userText.trim()) {
-				promptText += `${userName}: ${userText.trim()}\n\nAssistant:`;
-			} else {
-				promptText += `Assistant:`;
-			}
-		}
+		// Send only the latest user message text; Pi's context builder handles
+		// the rest using the properly seeded conversation history.
+		const promptText = lastUserMessage ? extractText(lastUserMessage) : "";
 
 		if (stream) {
 			await handleStreamingCompletion(req, res, {

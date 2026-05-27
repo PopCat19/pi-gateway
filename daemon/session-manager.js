@@ -21,7 +21,7 @@ const sessions = new Map();
  * @param {import("@earendil-works/pi-coding-agent").ModelRegistry} [options.modelRegistry] - Shared registry
  * @returns {Promise<{session: import("@earendil-works/pi-coding-agent").AgentSession, isNew: boolean}>}
  */
-export async function getSession({ conversationId, model, agentDir, signal, modelRegistry: sharedRegistry }) {
+export async function getSession({ conversationId, model, agentDir, signal, modelRegistry: sharedRegistry, enableTools }) {
   // Check for existing session
   const existing = sessions.get(conversationId);
   if (existing && !signal?.aborted) {
@@ -80,6 +80,7 @@ export async function getSession({ conversationId, model, agentDir, signal, mode
     model: resolvedModel,
     sessionManager,
     settingsManager,
+    noTools: enableTools ? undefined : "all",
   });
   
   // Cache the session
@@ -136,6 +137,73 @@ export function buildHistoryContext(messages) {
   if (parts.length === 0) return "";
 
   return `[Conversation history — continue from here, responding ONLY as the assistant:]\n\n${parts.join("\n\n")}`;
+}
+
+/**
+ * Convert a Pi-format message into a proper AgentMessage for seeding session state.
+ * @param {object} msg - Message from convertMessages()
+ * @param {object} model - Resolved model object
+ * @returns {import("@earendil-works/pi-coding-agent").AgentMessage | null}
+ */
+export function convertToAgentMessage(msg, model) {
+  if (!msg) return null;
+
+  if (msg.role === "user") {
+    return {
+      role: "user",
+      content: msg.content,
+      timestamp: msg.timestamp || Date.now(),
+    };
+  }
+
+  if (msg.role === "assistant") {
+    const content = [];
+
+    // Convert reasoning_content to Pi thinking block
+    if (msg.reasoning_content) {
+      content.push({ type: "thinking", thinking: msg.reasoning_content });
+    }
+
+    // Add text blocks
+    if (Array.isArray(msg.content)) {
+      for (const block of msg.content) {
+        if (block.type === "text") {
+          content.push(block);
+        }
+      }
+    }
+
+    return {
+      role: "assistant",
+      content,
+      api: model?.api || "unknown",
+      provider: model?.provider || "unknown",
+      model: model?.id || "unknown",
+      usage: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
+      stopReason: "stop",
+      timestamp: msg.timestamp || Date.now(),
+    };
+  }
+
+  if (msg.role === "toolResult") {
+    return {
+      role: "toolResult",
+      toolCallId: msg.toolCallId,
+      toolName: msg.toolName,
+      content: msg.content,
+      isError: msg.isError || false,
+      timestamp: msg.timestamp || Date.now(),
+    };
+  }
+
+  return null;
 }
 
 /**
