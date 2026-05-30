@@ -500,9 +500,9 @@ async function handleStreamingCompletion(
 						const startMarker = `
 
 [${event.toolName}]
-\`\`\`
+\`\`\`\`
 ${argsDisplay}
-\`\`\`
+\`\`\`\`
 [pending...]
 `;
 						const startChunk = {
@@ -609,8 +609,8 @@ ${argsDisplay}
 						const exitCode = event.isError ? (event.result?.exitCode ?? 1) : 0;
 						const durationStr = duration !== null ? `${duration}s` : "?s";
 
-						// Format: [pending...]\n```lang\n<output>\n```\n[tool (duration, exit X)]\n\n
-						const endMarker = `\`\`\`${codeLang}\n${truncated}\n\`\`\`\n[${event.toolName} (${durationStr}, exit ${exitCode})]\n\n`;
+						// Format: [pending...]\n````lang\n<output>\n````\n[tool (duration, exit X)]\n\n
+						const endMarker = `\`\`\`\`${codeLang}\n${truncated}\n\`\`\`\`\n[${event.toolName} (${durationStr}, exit ${exitCode})]\n\n`;
 						const endChunk = {
 							id: completionId,
 							object: "chat.completion.chunk",
