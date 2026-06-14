@@ -4,8 +4,8 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { getPaths } from "../lib/paths.js";
 import { createDefaultConfig } from "../lib/config.js";
+import { getPaths } from "../lib/paths.js";
 
 const packageRoot = path.dirname(fileURLToPath(new URL("../package.json", import.meta.url)));
 const agentDir = path.join(homedir(), ".pi", "agent");
@@ -28,9 +28,9 @@ function printUsage() {
 	console.log("pi-gateway - Multi-instance OpenAI-compatible gateway\n");
 	console.log("Usage: pi-gateway <command> [args]\n");
 	console.log("Commands:");
-	const maxCmdLen = Math.max(...Object.keys(COMMANDS).map(c => c.length));
+	const maxCmdLen = Math.max(...Object.keys(COMMANDS).map((c) => c.length));
 	for (const [cmd, info] of Object.entries(COMMANDS)) {
-		const args = info.args.map(a => a.endsWith("?") ? `[${a}]` : `<${a}>`).join(" ");
+		const args = info.args.map((a) => (a.endsWith("?") ? `[${a}]` : `<${a}>`)).join(" ");
 		const flags = cmd === "create" ? " [--needed] [--port PORT]" : "";
 		console.log(`  ${cmd.padEnd(maxCmdLen + 2)} ${args}${flags}  ${info.desc}`);
 	}
@@ -153,7 +153,7 @@ function cmdCreate(name, options = {}) {
 	mkdirSync(workspaceDir, { recursive: true });
 
 	const config = createDefaultConfig();
-	
+
 	// Auto-assign port (explicit --port overrides auto-assignment)
 	if (options.port) {
 		config.port = options.port;
@@ -290,8 +290,12 @@ function cmdRestart(name) {
 	}
 
 	// Clean stale state from previous run
-	try { rmSync(path.join(workspaceDir, "run", "status.json")); } catch {}
-	try { rmSync(path.join(workspaceDir, "run", "daemon.lock")); } catch {}
+	try {
+		rmSync(path.join(workspaceDir, "run", "status.json"));
+	} catch {}
+	try {
+		rmSync(path.join(workspaceDir, "run", "daemon.lock"));
+	} catch {}
 
 	cmdStart(name);
 }
@@ -470,11 +474,11 @@ async function main() {
 	}
 
 	const { args: expected } = COMMANDS[cmd];
-	const required = expected.filter(a => !a.endsWith("?") && !a.endsWith("..."));
-	const variadic = expected.some(a => a.endsWith("..."));
+	const required = expected.filter((a) => !a.endsWith("?") && !a.endsWith("..."));
+	const variadic = expected.some((a) => a.endsWith("..."));
 	const maxArgs = variadic ? Infinity : expected.length;
 	if (cmdArgs.length < required.length || (!variadic && cmdArgs.length === 0 && required.length > 0)) {
-		console.error(`Usage: pi-gateway ${cmd} ${expected.map(a => a.endsWith("?") ? `[${a}]` : a.endsWith("...") ? `<${a}>` : `<${a}>`).join(" ")}`);
+		console.error(`Usage: pi-gateway ${cmd} ${expected.map((a) => (a.endsWith("?") ? `[${a}]` : a.endsWith("...") ? `<${a}>` : `<${a}>`)).join(" ")}`);
 		process.exit(1);
 	}
 	if (!variadic && cmdArgs.length > maxArgs) {
@@ -513,7 +517,7 @@ async function main() {
 	}
 }
 
-main().catch(err => {
+main().catch((err) => {
 	console.error(err.message);
 	process.exit(1);
 });

@@ -10,10 +10,15 @@
   },
   "scripts": {
     "start": "node bin/pi-gateway-server.mjs",
-    "test": "node --test"
+    "test": "node --test",
+    "lint": "bash ./scripts/lint.sh",
+    "lint:fix": "bash ./scripts/lint-fix.sh"
   },
   "pi": {
     "extensions": ["./index.js"]
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.9"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "^0.75.3",
@@ -21,6 +26,13 @@
     "uuid": "^10.0.0",
     "@sinclair/typebox": "^0.34.41"
   },
-  "keywords": ["pi", "gateway", "openai", "llm", "api", "backend"],
+  "keywords": [
+    "pi",
+    "gateway",
+    "openai",
+    "llm",
+    "api",
+    "backend"
+  ],
   "license": "MIT"
 }

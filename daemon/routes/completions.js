@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { v4 as uuidv4 } from "uuid";
-import { getSession, convertToAgentMessage } from "../session-manager.js";
+import { convertToAgentMessage, getSession } from "../session-manager.js";
 
 export const completionsRouter = Router();
 
@@ -25,28 +25,27 @@ function convertMessages(openaiMessages) {
 							? msg.content
 							: (msg.content || [])
 									.map((c) => {
-											if (!c) return null;
-											if (c.type === "text")
-												return { type: "text", text: c.text };
-											if (c.type === "image_url") {
-												const url = c.image_url?.url || "";
-												// Handle base64 data URLs
-												if (url.startsWith("data:")) {
-													const match = url.match(/^data:([^;]+);base64,(.+)$/);
-													if (match) {
-														return {
-															type: "image",
-															mimeType: match[1],
-															data: match[2],
-														};
-													}
+										if (!c) return null;
+										if (c.type === "text") return { type: "text", text: c.text };
+										if (c.type === "image_url") {
+											const url = c.image_url?.url || "";
+											// Handle base64 data URLs
+											if (url.startsWith("data:")) {
+												const match = url.match(/^data:([^;]+);base64,(.+)$/);
+												if (match) {
+													return {
+														type: "image",
+														mimeType: match[1],
+														data: match[2],
+													};
 												}
-												// For external URLs, we'd need to fetch - skip for now
-												return null;
 											}
+											// For external URLs, we'd need to fetch - skip for now
 											return null;
-										})
-										.filter(Boolean),
+										}
+										return null;
+									})
+									.filter(Boolean),
 					timestamp: Date.now(),
 				};
 				if (msg.name) userMsg.name = msg.name;
@@ -79,10 +78,7 @@ function convertMessages(openaiMessages) {
 					content: [
 						{
 							type: "text",
-							text:
-								typeof msg.content === "string"
-									? msg.content
-									: JSON.stringify(msg.content),
+							text: typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content),
 						},
 					],
 					isError: false,
@@ -164,14 +160,7 @@ function extractThinking(message) {
  */
 completionsRouter.post("/", async (req, res) => {
 	const { paths, config, modelRegistry } = req.context;
-	const {
-		messages,
-		model,
-		stream = false,
-		max_tokens,
-		temperature,
-		...rest
-	} = req.body;
+	const { messages, model, stream = false, max_tokens, temperature, ...rest } = req.body;
 
 	// Validate request
 	if (!messages || !Array.isArray(messages) || messages.length === 0) {
@@ -184,10 +173,7 @@ completionsRouter.post("/", async (req, res) => {
 	}
 
 	const modelId = model || config.defaultModel || "ollama/glm-5";
-	const conversationId =
-		req.headers["x-conversation-id"] ||
-		req.body.metadata?.conversation_id ||
-		uuidv4();
+	const conversationId = req.headers["x-conversation-id"] || req.body.metadata?.conversation_id || uuidv4();
 
 	try {
 		// Get or create Pi session
@@ -201,25 +187,19 @@ completionsRouter.post("/", async (req, res) => {
 		});
 
 		// Convert messages to Pi format
-		const { messages: piMessages, systemPrompt: frontendSystemPrompt } =
-			convertMessages(messages);
+		const { messages: piMessages, systemPrompt: frontendSystemPrompt } = convertMessages(messages);
 
 		// Determine the boundary between history and the current prompt.
 		// Use the last user message as the active prompt; everything before it is history.
 		const lastUserIndex = piMessages.map((m) => m.role).lastIndexOf("user");
-		const historyMessages =
-			lastUserIndex > 0 ? piMessages.slice(0, lastUserIndex) : [];
-		const lastUserMessage =
-			lastUserIndex >= 0 ? piMessages[lastUserIndex] : undefined;
+		const historyMessages = lastUserIndex > 0 ? piMessages.slice(0, lastUserIndex) : [];
+		const lastUserMessage = lastUserIndex >= 0 ? piMessages[lastUserIndex] : undefined;
 
 		// Override Pi's default coding-assistant system prompt with the frontend's persona.
 		// This prevents the model from impersonating Pi's internal agent identity.
 		// useThreadPersona: true = let thread history define persona (no injected system prompt)
 		// useThreadPersona: false = use config systemPrompt as fallback
-		const effectiveSystemPrompt =
-			frontendSystemPrompt ||
-			(config.useThreadPersona ? "" : config.systemPrompt) ||
-			"";
+		const effectiveSystemPrompt = frontendSystemPrompt || (config.useThreadPersona ? "" : config.systemPrompt) || "";
 		session._baseSystemPrompt = effectiveSystemPrompt;
 		session.agent.state.systemPrompt = effectiveSystemPrompt;
 
@@ -273,11 +253,7 @@ completionsRouter.post("/", async (req, res) => {
 /**
  * Handle streaming completion with SSE.
  */
-async function handleStreamingCompletion(
-	req,
-	res,
-	{ session, promptText, model, conversationId },
-) {
+async function handleStreamingCompletion(req, res, { session, promptText, model, conversationId }) {
 	// Set SSE headers
 	res.setHeader("Content-Type", "text/event-stream");
 	res.setHeader("Cache-Control", "no-cache");
@@ -309,10 +285,7 @@ async function handleStreamingCompletion(
 					if (event.message?.role === "assistant") {
 						// Track if we've seen tool calls
 						const hasToolCallsInMessage =
-							Array.isArray(event.message?.content) &&
-							event.message.content.some(
-								(b) => b.type === "tool_use" || b.type === "toolCall",
-							);
+							Array.isArray(event.message?.content) && event.message.content.some((b) => b.type === "tool_use" || b.type === "toolCall");
 						if (hasToolCallsInMessage) {
 							hasSeenToolCalls = true;
 						}
@@ -406,9 +379,7 @@ async function handleStreamingCompletion(
 						}
 
 						// Send any remaining thinking content
-						const remainingThinking = thinkingContent.slice(
-							sentThinking.length,
-						);
+						const remainingThinking = thinkingContent.slice(sentThinking.length);
 						if (remainingThinking) {
 							sentThinking += remainingThinking;
 							hasStartedStreaming = true;
@@ -471,10 +442,7 @@ async function handleStreamingCompletion(
 						let argsDisplay = "";
 						if (event.args) {
 							try {
-								const args =
-									typeof event.args === "string"
-										? JSON.parse(event.args)
-										: event.args;
+								const args = typeof event.args === "string" ? JSON.parse(event.args) : event.args;
 								if (event.toolName === "bash" && args.command) {
 									argsDisplay = args.command;
 								} else if (event.toolName === "read" && args.path) {
@@ -485,9 +453,7 @@ async function handleStreamingCompletion(
 									const parts = [];
 									for (const [key, val] of Object.entries(args)) {
 										if (val !== undefined && val !== null) {
-											parts.push(
-												`${key}: ${typeof val === "string" ? val : JSON.stringify(val)}`,
-											);
+											parts.push(`${key}: ${typeof val === "string" ? val : JSON.stringify(val)}`);
 										}
 									}
 									argsDisplay = parts.join("\n");
@@ -532,9 +498,7 @@ ${argsDisplay}
 
 					if (event.toolName) {
 						const startTime = toolStartTimes.get(event.toolCallId);
-						const duration = startTime
-							? ((Date.now() - startTime) / 1000).toFixed(1)
-							: null;
+						const duration = startTime ? ((Date.now() - startTime) / 1000).toFixed(1) : null;
 						toolStartTimes.delete(event.toolCallId);
 
 						// Extract text content from result
@@ -551,13 +515,8 @@ ${argsDisplay}
 									resultText = result;
 								} else if (result.message) {
 									resultText = result.message;
-								} else if (
-									result.stdout !== undefined ||
-									result.stderr !== undefined
-								) {
-									resultText =
-										[result.stdout, result.stderr].filter(Boolean).join("\n") ||
-										"(no output)";
+								} else if (result.stdout !== undefined || result.stderr !== undefined) {
+									resultText = [result.stdout, result.stderr].filter(Boolean).join("\n") || "(no output)";
 								} else {
 									resultText = JSON.stringify(result, null, 2);
 								}
@@ -568,25 +527,15 @@ ${argsDisplay}
 
 						// Truncate to 30 lines
 						const lines = resultText.split("\n");
-						const truncated =
-							lines.length > 30
-								? lines.slice(0, 30).join("\n") +
-									`\n... (${lines.length - 30} more lines)`
-								: resultText;
+						const truncated = lines.length > 30 ? lines.slice(0, 30).join("\n") + `\n... (${lines.length - 30} more lines)` : resultText;
 
 						// Detect language for code block
 						let codeLang = "";
 						if (event.toolName === "bash") {
 							codeLang = ""; // No language for bash output (plain text)
-						} else if (
-							event.toolName === "read" ||
-							event.toolName === "write"
-						) {
+						} else if (event.toolName === "read" || event.toolName === "write") {
 							try {
-								const args =
-									typeof event.args === "string"
-										? JSON.parse(event.args)
-										: event.args;
+								const args = typeof event.args === "string" ? JSON.parse(event.args) : event.args;
 								if (args?.path) {
 									const ext = args.path.split(".").pop()?.toLowerCase();
 									const langMap = {
@@ -699,11 +648,7 @@ ${argsDisplay}
 /**
  * Handle non-streaming completion.
  */
-async function handleNonStreamingCompletion(
-	req,
-	res,
-	{ session, promptText, model, conversationId },
-) {
+async function handleNonStreamingCompletion(req, res, { session, promptText, model, conversationId }) {
 	const completionId = `chatcmpl-${uuidv4().replace(/-/g, "").slice(0, 24)}`;
 	const created = Math.floor(Date.now() / 1000);
 

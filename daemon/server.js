@@ -1,9 +1,9 @@
-import express from "express";
+import { readFileSync, writeFileSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { writeFileSync, readFileSync } from "node:fs";
-import { ModelRegistry, AuthStorage } from "@earendil-works/pi-coding-agent";
+import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
+import express from "express";
 import { completionsRouter } from "./routes/completions.js";
 import { modelsRouter } from "./routes/models.js";
 
@@ -12,100 +12,100 @@ import { modelsRouter } from "./routes/models.js";
  * @param {{ paths: ReturnType<typeof import("../lib/paths.js").getPaths>, config: import("../lib/config.js").GatewayConfig }} options
  */
 export async function createServer({ paths, config }) {
-  const app = express();
+	const app = express();
 
-  // Middleware
-  app.use(express.json({ limit: "10mb" }));
+	// Middleware
+	app.use(express.json({ limit: "10mb" }));
 
-  // CORS for any frontend
-  app.use((req, res, next) => {
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-    if (req.method === "OPTIONS") {
-      return res.sendStatus(204);
-    }
-    next();
-  });
+	// CORS for any frontend
+	app.use((req, res, next) => {
+		res.setHeader("Access-Control-Allow-Origin", "*");
+		res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+		res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+		if (req.method === "OPTIONS") {
+			return res.sendStatus(204);
+		}
+		next();
+	});
 
-  // Optional API key auth
-  if (config.apiKey) {
-    app.use((req, res, next) => {
-      const auth = req.headers.authorization;
-      if (!auth || auth !== `Bearer ${config.apiKey}`) {
-        return res.status(401).json({ error: { message: "Unauthorized", type: "invalid_request_error" } });
-      }
-      next();
-    });
-  }
+	// Optional API key auth
+	if (config.apiKey) {
+		app.use((req, res, next) => {
+			const auth = req.headers.authorization;
+			if (!auth || auth !== `Bearer ${config.apiKey}`) {
+				return res.status(401).json({ error: { message: "Unauthorized", type: "invalid_request_error" } });
+			}
+			next();
+		});
+	}
 
-  // Create shared model registry for routes
-  const piAgentDir = paths.agentDir || join(homedir(), ".pi", "agent");
-  const authStorage = await AuthStorage.create(join(piAgentDir, "auth.json"));
-  const modelRegistry = await ModelRegistry.create(authStorage, join(piAgentDir, "models.json"));
+	// Create shared model registry for routes
+	const piAgentDir = paths.agentDir || join(homedir(), ".pi", "agent");
+	const authStorage = await AuthStorage.create(join(piAgentDir, "auth.json"));
+	const modelRegistry = await ModelRegistry.create(authStorage, join(piAgentDir, "models.json"));
 
-  // Request context
-  app.use((req, res, next) => {
-    req.context = { paths, config, modelRegistry, piAgentDir };
-    next();
-  });
+	// Request context
+	app.use((req, res, next) => {
+		req.context = { paths, config, modelRegistry, piAgentDir };
+		next();
+	});
 
-  // Routes
-  app.use("/v1/chat/completions", completionsRouter);
-  app.use("/v1/models", modelsRouter);
+	// Routes
+	app.use("/v1/chat/completions", completionsRouter);
+	app.use("/v1/models", modelsRouter);
 
-  // Health check
-  app.get("/health", (req, res) => {
-    res.json({ status: "ok", timestamp: new Date().toISOString() });
-  });
+	// Health check
+	app.get("/health", (req, res) => {
+		res.json({ status: "ok", timestamp: new Date().toISOString() });
+	});
 
-  // Error handler
-  app.use((err, req, res, next) => {
-    console.error("Error:", err);
-    res.status(500).json({
-      error: {
-        message: err.message || "Internal server error",
-        type: "server_error",
-      },
-    });
-  });
+	// Error handler
+	app.use((err, req, res, next) => {
+		console.error("Error:", err);
+		res.status(500).json({
+			error: {
+				message: err.message || "Internal server error",
+				type: "server_error",
+			},
+		});
+	});
 
-  const server = createHttpServer(app);
+	const server = createHttpServer(app);
 
-  // Try to bind, retrying next port on EADDRINUSE
-  let port = config.port;
-  const maxRetries = 10;
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    try {
-      await new Promise((resolve, reject) => {
-        server.once("error", (err) => {
-          if (err.code === "EADDRINUSE") {
-            reject(err);
-          } else {
-            reject(new Error(err.message || "Server error"));
-          }
-        });
-        server.listen(port, config.host, () => resolve());
-      });
-      // Success — if port changed, update config
-      if (port !== config.port) {
-        try {
-          const configPath = join(paths.workspaceDir, "config.json");
-          const updated = { ...JSON.parse(readFileSync(configPath, "utf-8")), port };
-          writeFileSync(configPath, JSON.stringify(updated, null, "\t"));
-          console.log(`Port updated to ${port} in config`);
-        } catch {}
-      }
-      break;
-    } catch (err) {
-      if (err.code === "EADDRINUSE") {
-        port++;
-        server.removeAllListeners("error");
-        continue;
-      }
-      throw err;
-    }
-  }
+	// Try to bind, retrying next port on EADDRINUSE
+	let port = config.port;
+	const maxRetries = 10;
+	for (let attempt = 0; attempt < maxRetries; attempt++) {
+		try {
+			await new Promise((resolve, reject) => {
+				server.once("error", (err) => {
+					if (err.code === "EADDRINUSE") {
+						reject(err);
+					} else {
+						reject(new Error(err.message || "Server error"));
+					}
+				});
+				server.listen(port, config.host, () => resolve());
+			});
+			// Success — if port changed, update config
+			if (port !== config.port) {
+				try {
+					const configPath = join(paths.workspaceDir, "config.json");
+					const updated = { ...JSON.parse(readFileSync(configPath, "utf-8")), port };
+					writeFileSync(configPath, JSON.stringify(updated, null, "\t"));
+					console.log(`Port updated to ${port} in config`);
+				} catch {}
+			}
+			break;
+		} catch (err) {
+			if (err.code === "EADDRINUSE") {
+				port++;
+				server.removeAllListeners("error");
+				continue;
+			}
+			throw err;
+		}
+	}
 
-  return server;
+	return server;
 }

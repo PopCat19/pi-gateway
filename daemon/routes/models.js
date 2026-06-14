@@ -1,4 +1,4 @@
-import { readFileSync, existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Router } from "express";
 
@@ -8,26 +8,26 @@ export const modelsRouter = Router();
  * Convert a Pi model registry entry to an OpenAI model object.
  */
 function toOpenAIModel(model) {
-  return {
-    id: `${model.provider}/${model.id}`,
-    object: "model",
-    created: Date.now(),
-    owned_by: model.provider,
-    name: `${model.provider}/${model.name || model.id}`,
-  };
+	return {
+		id: `${model.provider}/${model.id}`,
+		object: "model",
+		created: Date.now(),
+		owned_by: model.provider,
+		name: `${model.provider}/${model.name || model.id}`,
+	};
 }
 
 /**
  * Load runtime models from the central location (written by the gateway extension).
  */
 function loadRuntimeModels(paths) {
-  const runtimePath = join(paths.agentDir || "", "pi-gateway", "runtime-models.json");
-  if (!existsSync(runtimePath)) return [];
-  try {
-    return JSON.parse(readFileSync(runtimePath, "utf-8"));
-  } catch {
-    return [];
-  }
+	const runtimePath = join(paths.agentDir || "", "pi-gateway", "runtime-models.json");
+	if (!existsSync(runtimePath)) return [];
+	try {
+		return JSON.parse(readFileSync(runtimePath, "utf-8"));
+	} catch {
+		return [];
+	}
 }
 
 /**
@@ -36,80 +36,80 @@ function loadRuntimeModels(paths) {
  * Runtime models replace registry models with the same provider+id.
  */
 function collectModels(modelRegistry, runtimeModels) {
-  const seen = new Set();
-  const models = [];
+	const seen = new Set();
+	const models = [];
 
-  // Runtime models always included (extension-registered, auth verified by Pi)
-  for (const m of runtimeModels) {
-    if (m.provider && m.id) {
-      const key = `${m.provider}/${m.id}`;
-      if (!seen.has(key)) {
-        seen.add(key);
-        models.push(toOpenAIModel(m));
-      }
-    }
-  }
+	// Runtime models always included (extension-registered, auth verified by Pi)
+	for (const m of runtimeModels) {
+		if (m.provider && m.id) {
+			const key = `${m.provider}/${m.id}`;
+			if (!seen.has(key)) {
+				seen.add(key);
+				models.push(toOpenAIModel(m));
+			}
+		}
+	}
 
-  // Registry models: only include from configured providers
-  if (modelRegistry?.models) {
-    for (const m of modelRegistry.models) {
-      if (m.provider && m.id) {
-        const key = `${m.provider}/${m.id}`;
-        if (!seen.has(key) && modelRegistry.hasConfiguredAuth(m)) {
-          seen.add(key);
-          models.push(toOpenAIModel(m));
-        }
-      }
-    }
-  }
+	// Registry models: only include from configured providers
+	if (modelRegistry?.models) {
+		for (const m of modelRegistry.models) {
+			if (m.provider && m.id) {
+				const key = `${m.provider}/${m.id}`;
+				if (!seen.has(key) && modelRegistry.hasConfiguredAuth(m)) {
+					seen.add(key);
+					models.push(toOpenAIModel(m));
+				}
+			}
+		}
+	}
 
-  return models;
+	return models;
 }
 
 /**
  * GET /v1/models - List all models (extension registrations + built-in + custom).
  */
 modelsRouter.get("/", (req, res) => {
-  const { config, modelRegistry, paths } = req.context;
-  const runtimeModels = loadRuntimeModels(paths);
-  const models = collectModels(modelRegistry, runtimeModels);
+	const { config, modelRegistry, paths } = req.context;
+	const runtimeModels = loadRuntimeModels(paths);
+	const models = collectModels(modelRegistry, runtimeModels);
 
-  // Ensure default model is present
-  if (config.defaultModel && !models.find(m => m.id === config.defaultModel)) {
-    const [provider] = config.defaultModel.split("/");
-    models.push({
-      id: config.defaultModel,
-      object: "model",
-      created: Date.now(),
-      owned_by: provider || "pi",
-    });
-  }
+	// Ensure default model is present
+	if (config.defaultModel && !models.find((m) => m.id === config.defaultModel)) {
+		const [provider] = config.defaultModel.split("/");
+		models.push({
+			id: config.defaultModel,
+			object: "model",
+			created: Date.now(),
+			owned_by: provider || "pi",
+		});
+	}
 
-  res.json({
-    object: "list",
-    data: models,
-  });
+	res.json({
+		object: "list",
+		data: models,
+	});
 });
 
 /**
  * GET /v1/models/:id - Get a specific model.
  */
 modelsRouter.get("/:id(*)", (req, res) => {
-  const { modelRegistry, paths } = req.context;
-  const runtimeModels = loadRuntimeModels(paths);
-  const models = collectModels(modelRegistry, runtimeModels);
-  const { id } = req.params;
-  const model = models.find(m => m.id === id);
+	const { modelRegistry, paths } = req.context;
+	const runtimeModels = loadRuntimeModels(paths);
+	const models = collectModels(modelRegistry, runtimeModels);
+	const { id } = req.params;
+	const model = models.find((m) => m.id === id);
 
-  if (model) {
-    return res.json(model);
-  }
+	if (model) {
+		return res.json(model);
+	}
 
-  const [provider] = id.split("/");
-  res.json({
-    id,
-    object: "model",
-    created: Date.now(),
-    owned_by: provider || "pi",
-  });
+	const [provider] = id.split("/");
+	res.json({
+		id,
+		object: "model",
+		created: Date.now(),
+		owned_by: provider || "pi",
+	});
 });
